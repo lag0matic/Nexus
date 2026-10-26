@@ -7612,7 +7612,11 @@ mod tests {
     ///
     /// 816 → 840 (SPEC-1 C2): `id`, the record's stable identity — 24 bytes, and the price of
     /// being able to address a change to THE row instead of to a position.
-    const QSO_RECORD_SIZE: usize = 840;
+    ///
+    /// 840 → 856 (Longwave): the fifth optional status in `UploadState` — 16 bytes for a
+    /// durable per-contact upload stamp, following the other services' inline layout.
+    /// The contest payload remains boxed; none of its fields were inlined.
+    const QSO_RECORD_SIZE: usize = 856;
 
     #[test]
     fn tempodeep_gets_its_own_submode_not_tempofasts() {
