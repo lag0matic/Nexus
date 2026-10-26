@@ -23,6 +23,19 @@
 import type { PartialCatalog } from './index'
 
 export const JA: PartialCatalog = {
+  'settings.longwave.sync.saveFirst': '同期する前にLongwaveの送信先とトークンの変更を保存してください。',
+  'logbook.longwave.sync.label': 'Longwaveを同期',
+  'logbook.longwave.sync.busy': 'Longwaveを同期中...',
+  'logbook.longwave.sync.title': '保存済みのLongwaveログをローカルログに取り込みます。既存のローカル交信は保持されます。',
+  'logbook.longwave.sync.done': 'Longwave: 追加 {{added}}、更新 {{updated}}、登録済み {{skipped}}。',
+  'logbook.longwave.sync.failed': 'Longwaveの同期に失敗しました: {{detail}}',
+  'logbook.longwave.push.label': 'Longwaveにアップロード',
+  'logbook.longwave.push.busy': 'Longwaveにアップロード中...',
+  'logbook.longwave.push.title': '{{call}}を保存済みのLongwaveログにアップロード',
+  'logbook.longwave.push.blocked': '送信済み、または未確認です。再送信する前にLongwaveを確認してください。',
+  'logbook.longwave.pending': '未確認です。履歴を同期し、再送信する前にLongwaveを確認してください。',
+  'logbook.longwave.push.done': 'Longwave: {{call}} — {{state}}',
+  'logbook.longwave.push.failed': 'Longwaveへのアップロードに失敗しました: {{detail}}。再送信する前にLongwaveを確認してください。',
   "settings.longwave.title": "Longwave",
   "settings.longwave.url.label": "サーバーURL",
   "settings.longwave.token.label": "クライアントトークン",

@@ -6,7 +6,7 @@
 // field Nexus preserved but does not model were all logged and then invisible. This is the
 // window that shows them.
 //
-// ⭐ READ-ONLY, DELIBERATELY. Editing already exists — the row's pencil opens the inline form,
+// Field editing already exists — the row's pencil opens the inline form,
 // which is the one writer. A second editing surface would be a second source of truth for the
 // same record, and the two come apart exactly where it matters.
 //
@@ -21,6 +21,7 @@ import { useFocusReturn } from '../focusReturn'
 import { t } from '../i18n'
 import { addedColumnText, columnName, logColumn, uploadMark, uploadOf, uploadWord } from '../features/logColumns'
 import { QsoHistory } from './QsoHistory'
+import { LongwaveUpload } from './LongwaveUpload'
 
 /** A rendered field: a label and a value that is definitely worth showing. */
 type Field = { label: string; value: string; mono?: boolean }
@@ -47,9 +48,10 @@ export interface QsoDetailProps {
   onClose: () => void
   /** A change made from the History section (an undo): the log should be read again. */
   onChanged?: () => void
+  longwaveConfigured?: boolean
 }
 
-export function QsoDetail({ qso, onClose, onChanged }: QsoDetailProps) {
+export function QsoDetail({ qso, onClose, onChanged, longwaveConfigured }: QsoDetailProps) {
   // Closed, the keyboard goes back to the row it was opened from (focusReturn.ts).
   const returnFocus = useFocusReturn(!!qso)
   if (!qso) return null
@@ -82,7 +84,7 @@ export function QsoDetail({ qso, onClose, onChanged }: QsoDetailProps) {
     const c = logColumn(id)
     const st = uploadOf(q, id)
     if (!c || !st) return null
-    const word = uploadWord(uploadMark(st))
+    const word = uploadWord(uploadMark(st), id)
     return f(columnName(c), st.whenUnix ? `${word} · ${utc(st.whenUnix)}` : word)
   }
 
@@ -153,6 +155,7 @@ export function QsoDetail({ qso, onClose, onChanged }: QsoDetailProps) {
       upload('upEqsl'),
       upload('upQrz'),
       upload('upClublog'),
+      upload('upLongwave'),
     ]),
     section(t('qso.detail.section.contest'), [col('contest'), col('exchSent'), col('exchRcvd')]),
     section(t('qso.detail.section.programs'), [
@@ -207,6 +210,7 @@ export function QsoDetail({ qso, onClose, onChanged }: QsoDetailProps) {
             </dl>
           </section>
         )}
+        {longwaveConfigured && <LongwaveUpload key={q.id ?? `${q.call}|${q.whenUnix}`} qso={q} onChanged={onChanged} />}
         {/* THE CONTACT'S HISTORY, last: what changed it, and the undo of each change. Only a
             contact the log holds has an id to ask by. */}
         {q.id && <QsoHistory id={q.id} onChanged={onChanged} />}

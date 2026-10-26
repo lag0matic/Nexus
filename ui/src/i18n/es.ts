@@ -33,6 +33,19 @@
 import type { PartialCatalog } from './index'
 
 export const ES: PartialCatalog = {
+  'settings.longwave.sync.saveFirst': 'Guarde el destino de Longwave y los cambios del token antes de sincronizar.',
+  'logbook.longwave.sync.label': 'Sincronizar Longwave',
+  'logbook.longwave.sync.busy': 'Sincronizando Longwave...',
+  'logbook.longwave.sync.title': 'Importar el libro guardado de Longwave al registro local. Los contactos locales existentes se conservan.',
+  'logbook.longwave.sync.done': 'Longwave: {{added}} añadidos, {{updated}} actualizados, {{skipped}} ya presentes.',
+  'logbook.longwave.sync.failed': 'Error al sincronizar Longwave: {{detail}}',
+  'logbook.longwave.push.label': 'Enviar a Longwave',
+  'logbook.longwave.push.busy': 'Enviando a Longwave...',
+  'logbook.longwave.push.title': 'Enviar {{call}} al libro guardado de Longwave',
+  'logbook.longwave.push.blocked': 'Ya enviado o sin confirmar. Compruebe Longwave antes de volver a enviar.',
+  'logbook.longwave.pending': 'Sin confirmar. Sincronice el historial y compruebe Longwave antes de volver a enviar.',
+  'logbook.longwave.push.done': 'Longwave: {{call}} — {{state}}',
+  'logbook.longwave.push.failed': 'Error al enviar a Longwave: {{detail}}. Compruebe Longwave antes de volver a enviar.',
   "settings.longwave.title": "Longwave",
   "settings.longwave.url.label": "URL del servidor",
   "settings.longwave.token.label": "Token de cliente",

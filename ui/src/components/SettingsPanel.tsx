@@ -13274,7 +13274,7 @@ export function SettingsPanel({
                 </label>
               </div>
             </div>
-            <LongwaveSettings form={form} remote={locked('longwaveUrl')}
+            <LongwaveSettings form={form} saved={savedRef.current} remote={locked('longwaveUrl')}
               onChange={patch => {
                 markDirty()
                 setForm(current => current ? { ...current, ...patch } : current)

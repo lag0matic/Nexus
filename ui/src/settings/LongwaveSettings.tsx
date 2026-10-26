@@ -3,10 +3,12 @@ import { clearLongwaveToken, getLongwaveLogbooks, setLongwaveToken, type Longwav
 import { t } from '../i18n'
 import { pushToast } from '../toast'
 import type { Settings } from '../types'
+import { LongwaveSync } from '../components/LongwaveSync'
 
 /** A section of the existing logging form, not another logging workflow. */
-export function LongwaveSettings({ form, remote, onChange }: {
+export function LongwaveSettings({ form, saved, remote, onChange }: {
   form: Settings
+  saved?: Settings | null
   remote: boolean
   onChange: (patch: Partial<Settings>) => void
 }) {
@@ -17,6 +19,9 @@ export function LongwaveSettings({ form, remote, onChange }: {
   const [error, setError] = useState<string | null>(null)
   const request = useRef(0)
   const url = form.longwaveUrl ?? ''
+  const savedDestination = !!saved?.longwaveUrl?.trim() && !!saved.longwaveLogbookId?.trim()
+  const needsSave = !saved || url !== (saved.longwaveUrl ?? '') ||
+    (form.longwaveLogbookId ?? '') !== (saved.longwaveLogbookId ?? '') || !!token.trim()
   const currentUrl = useRef(url)
   currentUrl.current = url
   useEffect(() => () => { request.current++ }, [])
@@ -121,6 +126,10 @@ export function LongwaveSettings({ form, remote, onChange }: {
             onClick={() => onChange({ longwaveUpload: !form.longwaveUpload })}><span className="toggle-knob" /></button>
         </label>
         {stationHint}
+      </div>
+      <div className="settings-field">
+        <LongwaveSync className="settings-refresh" disabled={busy || credentialBusy || !savedDestination || needsSave}
+          title={needsSave ? t('settings.longwave.sync.saveFirst') : undefined} />
       </div>
     </div>
     {error && <span className="settings-error" role="alert">{error}</span>}

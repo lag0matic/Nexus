@@ -3480,6 +3480,7 @@ function App() {
             // The column choice lives in settings.json, saved through its one writer: a settings
             // save from an older copy keeps the live one (`set_logbook_columns`).
             columns={settings?.logbookColumns}
+            longwave={settings}
             onColumnsChange={(logbookColumns) => {
               setSettings((prev) => (prev ? { ...prev, logbookColumns } : prev))
               void withErrorToast(() => setLogbookColumns(logbookColumns), t('logbook.columns.saveFailed'))

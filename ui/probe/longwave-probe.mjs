@@ -52,6 +52,8 @@ try {
       await new Promise(resolve => setTimeout(resolve, 100))
     }
     assert.equal(selected, 'book-a', 'connection test populates the existing form')
+    assert.equal(await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Sync Longwave').disabled`),
+      true, 'an unsaved logbook selection must never sync')
     await evaluate(`document.querySelector('[data-setting=longwaveUpload]').click()`)
     await evaluate('new Promise(resolve => requestAnimationFrame(resolve))')
     assert.equal(await evaluate(`document.querySelector('[data-setting=longwaveUpload]').getAttribute('aria-checked')`), 'true')
@@ -63,12 +65,28 @@ try {
       await new Promise(resolve => setTimeout(resolve, 100))
     }
     assert.deepEqual(JSON.parse(saved ?? '{}'), { book: 'book-a', upload: true }, 'normal Save must persist Longwave settings')
+    let canSync = false
+    for (let i = 0; i < 50; i++) {
+      canSync = await evaluate(`![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Sync Longwave').disabled`)
+      if (canSync) break
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.equal(canSync, true, 'Save enables syncing the saved destination')
+    await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Sync Longwave').click()`)
+    let synced
+    for (let i = 0; i < 50; i++) {
+      synced = await evaluate('document.documentElement.dataset.longwaveSynced')
+      if (synced) break
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.deepEqual(JSON.parse(synced ?? '{}'), { url: 'https://log.example.invalid', book: 'book-a' },
+      'sync uses only the saved destination')
     assert.equal(await evaluate('document.querySelectorAll("[role=dialog]").length'), 0)
     const screenshot = await call('Page.captureScreenshot', { format: 'png' })
     const out = join(ui, '..', 'target', 'longwave-probe')
     await mkdir(out, { recursive: true })
     await writeFile(join(out, `settings-${width}x${height}.png`), Buffer.from(screenshot.data, 'base64'))
-    console.log(`PASS Longwave settings ${width}x${height}: usable controls, logbook selected, normal Save persists forwarding, no dialog`)
+    console.log(`PASS Longwave settings ${width}x${height}: usable controls, Save-first sync guard, saved destination sync, no dialog`)
   }
 } catch (error) {
   console.error(error)

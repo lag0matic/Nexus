@@ -2437,6 +2437,16 @@ export async function getLongwaveLogbooks(url: string): Promise<LongwaveLogbook[
   return invoke<LongwaveLogbook[]>('longwave_logbooks', { url })
 }
 
+/** Merge the saved Longwave destination into the unified local log, durably and deduplicated. */
+export async function syncLongwaveLogbook(): Promise<ImportStats> {
+  return invoke<ImportStats>('longwave_sync_logbook')
+}
+
+/** Explicit push; the station refuses contacts already sent or awaiting a certain result. */
+export async function longwavePushQso(record: LoggedQso): Promise<UploadReport> {
+  return invoke<UploadReport>('longwave_push_qso', { record })
+}
+
 /** Need-aware spotting: the stations heard now, ranked by award value. */
 export async function getNeedAlerts(): Promise<NeedAlert[]> {
   return invoke<NeedAlert[]>('get_need_alerts')

@@ -99,6 +99,7 @@ export const LOG_COLUMNS: readonly LogColumn[] = [
   { id: 'upEqsl', labelKey: 'logbook.column.upload', labelVars: { service: 'eQSL' }, track: '0.6fr', minPx: 28, group: 'uploads' },
   { id: 'upQrz', labelKey: 'logbook.column.upload', labelVars: { service: 'QRZ' }, track: '0.6fr', minPx: 28, group: 'uploads' },
   { id: 'upClublog', labelKey: 'logbook.column.upload', labelVars: { service: 'Club Log' }, track: '0.6fr', minPx: 28, group: 'uploads' },
+  { id: 'upLongwave', labelKey: 'logbook.column.upload', labelVars: { service: 'Longwave' }, track: '0.6fr', minPx: 28, group: 'uploads' },
   { id: 'contest', labelKey: 'logbook.column.contest', track: '1fr', minPx: 48, group: 'contest', sort: 'contest' },
   { id: 'exchSent', labelKey: 'logbook.column.exchSent', track: '1fr', minPx: 40, group: 'contest' },
   { id: 'exchRcvd', labelKey: 'logbook.column.exchRcvd', track: '1fr', minPx: 40, group: 'contest' },
@@ -324,7 +325,8 @@ export function contestExchange(q: LoggedQso, side: 'sent' | 'rcvd'): string | n
 export type UploadMark = 'done' | 'waiting' | 'failed' | 'none'
 
 /** An upload mark in words, for a tooltip and the detail view. */
-export function uploadWord(m: UploadMark): string {
+export function uploadWord(m: UploadMark, column?: string): string {
+  if (m === 'waiting' && column === 'upLongwave') return t('logbook.longwave.pending')
   switch (m) {
     case 'done':
       return t('logbook.upload.done')
@@ -357,6 +359,8 @@ export function uploadOf(q: LoggedQso, id: string): UploadStatus | undefined {
       return u?.qrz
     case 'upClublog':
       return u?.clublog
+    case 'upLongwave':
+      return u?.longwave ?? undefined
     default:
       return undefined
   }

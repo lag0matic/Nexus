@@ -6,16 +6,19 @@ import { LongwaveSettings } from './LongwaveSettings'
 import type { Settings } from '../types'
 
 const api = vi.hoisted(() => ({
-  setLongwaveToken: vi.fn(), clearLongwaveToken: vi.fn(), getLongwaveLogbooks: vi.fn(),
+  setLongwaveToken: vi.fn(), clearLongwaveToken: vi.fn(), getLongwaveLogbooks: vi.fn(), syncLongwaveLogbook: vi.fn(),
 }))
 vi.mock('../api', () => api)
 vi.mock('../toast', () => ({ pushToast: vi.fn() }))
 
-function Fixture({ remote = false }: { remote?: boolean }) {
+function Fixture({ remote = false, selected = false }: { remote?: boolean; selected?: boolean }) {
+  const saved = {
+    longwaveUrl: 'https://log.example.invalid', longwaveLogbookId: selected ? 'book-a' : '', longwaveUpload: false,
+  } as Settings
   const [form, setForm] = useState({
-    longwaveUrl: 'https://log.example.invalid', longwaveLogbookId: '', longwaveUpload: false,
+    ...saved,
   } as Settings)
-  return <><LongwaveSettings form={form} remote={remote} onChange={patch => setForm(f => ({ ...f, ...patch }))} />
+  return <><LongwaveSettings form={form} saved={saved} remote={remote} onChange={patch => setForm(f => ({ ...f, ...patch }))} />
     <output data-testid="form">{JSON.stringify(form)}</output></>
 }
 
@@ -28,6 +31,40 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('Longwave inside logging settings', () => {
+  it('syncs only the saved destination and requires Save after a destination edit', async () => {
+    api.syncLongwaveLogbook.mockResolvedValue({ added: 2, skipped: 1, updated: 0, total: 3 })
+    render(<Fixture selected />)
+    const sync = screen.getByRole('button', { name: 'Sync Longwave' }) as HTMLButtonElement
+    expect(sync.disabled).toBe(false)
+    fireEvent.click(sync)
+    await waitFor(() => expect(api.syncLongwaveLogbook).toHaveBeenCalledWith())
+    await waitFor(() => expect(sync.disabled).toBe(false))
+    fireEvent.change(screen.getByLabelText('Server URL'), { target: { value: 'https://other.invalid' } })
+    expect(sync.disabled).toBe(true)
+    expect(sync.title).toContain('Save')
+    fireEvent.click(sync)
+    expect(api.syncLongwaveLogbook).toHaveBeenCalledTimes(1)
+  })
+
+  it('requires Save after the connection test picks a different book', async () => {
+    render(<Fixture />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+    await screen.findByRole('option', { name: 'Home (N0CALL)' })
+    expect((screen.getByRole('button', { name: 'Sync Longwave' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(api.syncLongwaveLogbook).not.toHaveBeenCalled()
+  })
+
+  it('does not require saving unrelated forwarding edits, but holds an unsaved token draft', () => {
+    render(<Fixture selected />)
+    const sync = screen.getByRole('button', { name: 'Sync Longwave' }) as HTMLButtonElement
+    fireEvent.click(screen.getByRole('switch', { name: 'Forward logged QSOs' }))
+    expect(sync.disabled).toBe(false)
+    fireEvent.change(screen.getByLabelText('Client token'), { target: { value: 'new-test-input' } })
+    expect(sync.disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Client token'), { target: { value: '' } })
+    expect(sync.disabled).toBe(false)
+    expect(api.syncLongwaveLogbook).not.toHaveBeenCalled()
+  })
   it('does not contact Longwave or store a token in Settings on mount', () => {
     render(<Fixture />)
     expect(api.getLongwaveLogbooks).not.toHaveBeenCalled()

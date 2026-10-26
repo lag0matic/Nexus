@@ -16,6 +16,7 @@ import { Logbook } from './Logbook'
 import * as api from '../api'
 import type { LogQuestion } from '../features/logAnswers'
 import type { LogColumnsSaved } from '../features/logColumns'
+import { logSource } from '../features/logSource'
 
 beforeAll(() => {
   globalThis.ResizeObserver = class {
@@ -41,6 +42,8 @@ vi.mock('../api', () => {
     markQslSentById: noop(), markQslCardById: noop(),
     syncLotwReport: noop(), uploadLotwReport: noop(), qrzPushQso: noop(),
     clublogPushQso: noop(), hrdlogPushQso: noop(), wrlPushQso: noop(),
+    syncLongwaveLogbook: vi.fn(),
+    longwavePushQso: vi.fn(),
   }
 })
 vi.mock('../toast', () => ({
@@ -57,7 +60,7 @@ const CONTACT = {
   qslRcvd: { card: false, lotw: true, eqsl: false, qrz: false },
   qslSent: { sent: true, via: 'B', dateUnix: 1_700_500_000 },
   ota: { myProgram: null, myRef: null, theirProgram: null, theirRef: null, iota: 'EU-005' },
-  upload: { lotw: { outcome: 'accepted', whenUnix: 1_700_100_000 }, clublog: { outcome: 'rejected', whenUnix: 1_700_200_000, detail: 'record' } },
+  upload: { lotw: { outcome: 'accepted', whenUnix: 1_700_100_000 }, clublog: { outcome: 'rejected', whenUnix: 1_700_200_000, detail: 'record' }, longwave: { outcome: 'pending', whenUnix: 0 } },
   contest: { contestId: 'CQ-WW-CW', stx: 12, srx: 345, sent: [['RST', '599'], ['CQZ', '4']], rcvd: [['RST', '599'], ['CQZ', '14']] },
   extra: [
     ['CNTY', 'MA,MIDDLESEX'], ['CQZ', '14'], ['ITUZ', '28'], ['CONT', 'EU'], ['DISTANCE', '6512.4'],
@@ -65,7 +68,8 @@ const CONTACT = {
   ],
 }
 
-async function renderLog(props: { columns?: LogColumnsSaved | null; onColumnsChange?: (c: LogColumnsSaved | null) => void } = {}) {
+async function renderLog(props: { columns?: LogColumnsSaved | null; onColumnsChange?: (c: LogColumnsSaved | null) => void;
+  longwave?: { longwaveUrl: string; longwaveLogbookId: string } } = {}) {
   engineLog.mockResolvedValue([CONTACT])
   const utils = render(<Logbook defaultBand="20m" defaultFreqMhz={14.074} defaultMode="FT8" {...props} />)
   await waitFor(() => expect(utils.container.querySelector('.logbook-row:not(.head):not(.placeholder)')).not.toBeNull())
@@ -92,6 +96,43 @@ afterEach(() => {
 })
 
 describe('the default table is the one the Logbook had', () => {
+  it('refreshes the open detail stamp after an upload command rejects', async () => {
+    const { container } = await renderLog({ longwave: { longwaveUrl: 'https://log.example.invalid', longwaveLogbookId: 'saved-book' } })
+    const unsent = { ...CONTACT, upload: { longwave: null } }
+    engineLog.mockResolvedValue([unsent])
+    logSource().refresh()
+    fireEvent.doubleClick(row(container))
+    const push = await screen.findByRole('button', { name: 'Upload to Longwave' }) as HTMLButtonElement
+    await waitFor(() => expect(push.disabled).toBe(false))
+    vi.mocked(api.longwavePushQso).mockImplementation(async () => {
+      engineLog.mockResolvedValue([{ ...unsent, upload: { longwave: { outcome: 'authfail', whenUnix: 1_700_100_000 } } }])
+      throw new Error('Longwave refused the token')
+    })
+    fireEvent.click(push)
+    await waitFor(() => expect(screen.getByText(/^Refused/)).toBeTruthy())
+    await waitFor(() => expect(push.disabled).toBe(false))
+    expect(api.longwavePushQso).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers sync only for a saved destination and refreshes the unified list after importing', async () => {
+    const { container, rerender } = await renderLog()
+    expect(screen.queryByRole('button', { name: 'Sync Longwave' })).toBeNull()
+    rerender(<Logbook defaultBand="20m" defaultFreqMhz={14.074} defaultMode="FT8"
+      longwave={{ longwaveUrl: 'https://log.example.invalid', longwaveLogbookId: '' }} />)
+    expect(screen.queryByRole('button', { name: 'Sync Longwave' })).toBeNull()
+    rerender(<Logbook defaultBand="20m" defaultFreqMhz={14.074} defaultMode="FT8"
+      longwave={{ longwaveUrl: 'https://log.example.invalid', longwaveLogbookId: 'saved-book' }} />)
+    vi.mocked(api.syncLongwaveLogbook).mockImplementation(async () => {
+      engineLog.mockResolvedValue([CONTACT, { ...CONTACT, id: 'new-contact', call: 'K1ABC' }])
+      return { added: 1, updated: 0, skipped: 1, total: 2, run: 'longwave-run' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Sync Longwave' }))
+    await waitFor(() => expect(container.querySelector('.count-badge')?.textContent).toBe('2'))
+    expect(api.syncLongwaveLogbook).toHaveBeenCalledWith()
+    // No new button consumes the crowded per-row action track.
+    expect(screen.queryByRole('button', { name: 'Upload to Longwave' })).toBeNull()
+  })
+
   it('the same columns, and one track per cell rendered', async () => {
     const { container } = await renderLog()
     expect(headers()).toEqual(['Call', 'Country', 'Band', 'Freq', 'Mode', 'Sent', 'Rcvd', 'Date (UTC)', 'Time (UTC)', 'Park', 'QSL', 'Notes', 'Edit / delete'])
@@ -112,7 +153,7 @@ describe('the default table is the one the Logbook had', () => {
 
 describe('the added columns show what the store holds', () => {
   const ALL_ADDED: LogColumnsSaved = {
-    shown: ['grid', 'iota', 'county', 'cqz', 'ituz', 'cont', 'distance', 'qslSentDate', 'qslRcvdDate', 'lotwRcvdDate', 'eqslRcvdDate', 'upLotw', 'upEqsl', 'upQrz', 'upClublog', 'contest', 'exchSent', 'exchRcvd'],
+    shown: ['grid', 'iota', 'county', 'cqz', 'ituz', 'cont', 'distance', 'qslSentDate', 'qslRcvdDate', 'lotwRcvdDate', 'eqslRcvdDate', 'upLotw', 'upEqsl', 'upQrz', 'upClublog', 'upLongwave', 'contest', 'exchSent', 'exchRcvd'],
     hidden: [],
     widths: {},
   }
@@ -138,6 +179,7 @@ describe('the added columns show what the store holds', () => {
     expect(at('LoTW upload').getAttribute('title')).toMatch(/^Uploaded, 2023-11-16/)
     expect(at('Club Log upload').textContent).toBe('✗')
     expect(at('QRZ upload').getAttribute('title')).toBe('Not uploaded')
+    expect(at('Longwave upload').getAttribute('title')).toBe('Unconfirmed. Sync history and check Longwave before sending again.')
     expect(at('Contest').textContent).toBe('CQ-WW-CW')
     expect(at('Exchange sent').textContent).toBe('599 4')
     expect(at('Exchange received').textContent).toBe('599 14')

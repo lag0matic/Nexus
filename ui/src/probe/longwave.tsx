@@ -10,6 +10,13 @@ document.documentElement.dataset.theme = 'dark'
 let stationSettings = { ...settings, mycall: 'N0CALL', longwaveUrl: 'https://log.example.invalid', longwaveLogbookId: '', longwaveUpload: false }
 window.__TAURI_INTERNALS__ = {
   invoke: async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+    if (command === 'longwave_sync_logbook') {
+      if (args !== undefined) throw new Error('Sync must use saved station settings without arguments')
+      document.documentElement.dataset.longwaveSynced = JSON.stringify({
+        url: stationSettings.longwaveUrl, book: stationSettings.longwaveLogbookId,
+      })
+      return { added: 2, skipped: 1, updated: 0, total: 3 } as T
+    }
     if (command === 'set_settings') {
       stationSettings = { ...stationSettings, ...args?.settings as object }
       document.documentElement.dataset.longwaveSaved = JSON.stringify({

@@ -9,8 +9,9 @@ import { confirmDialog } from '../confirm'
 import { t } from '../i18n'
 import { T } from '../i18n/T'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { Activation, ImportStats, LogExport, LoggedActivation, LoggedQso } from '../types'
+import type { Activation, ImportStats, LogExport, LoggedActivation, LoggedQso, Settings } from '../types'
 import { QsoDetail } from './QsoDetail'
+import { LongwaveSync } from './LongwaveSync'
 import { RecentlyDeleted } from './RecentlyDeleted'
 import { LogTools, type LogTool } from './LogTools'
 import { useCallbookUpdateEnd } from './LogCallbookUpdate'
@@ -95,6 +96,8 @@ import { callCardTrigger, qrzPageOf } from './CallCard'
 import type { QrzCorrectResult, QsoEdit, RowAnswer, RowRef } from '../api'
 
 interface Props {
+  /** The saved destination, supplied by App's station settings (not a settings draft). */
+  longwave?: Pick<Settings, 'longwaveUrl' | 'longwaveLogbookId'> | null
   /** Default band / freq / mode for new manual entries (from the radio). */
   defaultBand: string
   defaultFreqMhz: number
@@ -292,7 +295,9 @@ export function Logbook({
   columns,
   onColumnsChange,
   activation,
+  longwave,
 }: Props) {
+  const longwaveConfigured = !!longwave?.longwaveUrl?.trim() && !!longwave.longwaveLogbookId?.trim()
   // The desktop asks `LogSource` for the pages of the list it shows (below, after the sort and
   // search state they are cut by). The source follows `logTick`, so the list moves when the log
   // changes under this view — a Remote browser's delete or edit, another instance's contact, a
@@ -482,6 +487,10 @@ export function Logbook({
   /** The contact open in the detail view (#313 — "there's no View capability"). Read-only:
    *  the pencil beside it is still the one editing path, so there is one writer. */
   const [viewing, setViewing] = useState<LoggedQso | null>(null)
+  const viewingRow = useLogAnswer(viewing?.id ? { kind: 'row', id: viewing.id } : null, logTick)
+  useEffect(() => {
+    if (viewingRow === null) setViewing(null)
+  }, [viewingRow])
   const editingKey = editing?.key ?? null
   // Column sort — the order the engine cuts the list's pages in (`features/logQuery`). Default
   // newest-first (the log's own order is oldest-first, which the test user disliked).
@@ -1864,7 +1873,7 @@ export function Logbook({
           c.group === 'uploads'
             ? (() => {
                 const st = uploadOf(editing.row, c.id)
-                return st ? uploadWord(uploadMark(st)) : null
+                return st ? uploadWord(uploadMark(st), c.id) : null
               })()
             : addedColumnText(editing.row, c.id)
         return v ? [[columnName(c), v]] : []
@@ -1875,7 +1884,7 @@ export function Logbook({
     if (c.group === 'uploads') {
       const st = uploadOf(q, c.id)
       const mark = uploadMark(st)
-      const word = uploadWord(mark)
+      const word = uploadWord(mark, c.id)
       const title = st?.whenUnix ? t('logbook.upload.title', { state: word, date: fmtUtc(st.whenUnix) }) : word
       return (
         <span className={`log-cell log-upload ${mark}`} title={title} aria-label={title}>
@@ -2041,6 +2050,7 @@ export function Logbook({
           >
             {t('logbook.qrzSync.label')}
           </button>
+          {longwaveConfigured && <LongwaveSync onImported={onImported} />}
           {/* Export date range (#98): bounds the ADIF/CSV exports below by UTC QSO date,
               inclusive. Empty = unbounded — no dates at all is the whole log, as before.
               The per-operator export stays deliberately unfiltered: it is the compliance
@@ -3464,7 +3474,8 @@ export function Logbook({
       />
       {/* Mounted beside SpotDialog at the section root, not inside the virtualised rows:
           the row that opened it can be recycled out from under the view while it is open. */}
-      <QsoDetail qso={viewing} onClose={() => setViewing(null)} onChanged={load} />
+      <QsoDetail qso={viewingRow === undefined ? viewing : viewingRow} longwaveConfigured={longwaveConfigured}
+        onClose={() => setViewing(null)} onChanged={load} />
       <RecentlyDeleted open={showDeleted} onClose={() => setShowDeleted(false)} onRestored={load} />
       <LogTools
         open={tools !== null}

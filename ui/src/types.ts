@@ -2754,6 +2754,7 @@ export interface UploadState {
   eqsl?: UploadStatus
   qrz?: UploadStatus
   clublog?: UploadStatus
+  longwave?: UploadStatus | null
 }
 /** Result of a LoTW upload (TQSL sign+upload). */
 export interface UploadReport {

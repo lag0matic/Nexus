@@ -154,6 +154,8 @@ const MIGRATED = [
   'features/exportLacks.ts',
   // The QSO detail view (#313) — born migrated: every string in it is a catalog key.
   'components/QsoDetail.tsx',
+  'components/LongwaveSync.tsx',
+  'components/LongwaveUpload.tsx',
   'components/QsoHistory.tsx',
   'components/RecentlyDeleted.tsx',
   // The import preview and its no-loss report's words — born migrated.

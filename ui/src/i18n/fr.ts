@@ -33,6 +33,19 @@
 import type { PartialCatalog } from './index'
 
 export const FR: PartialCatalog = {
+  'settings.longwave.sync.saveFirst': 'Enregistrez la destination Longwave et les modifications du jeton avant de synchroniser.',
+  'logbook.longwave.sync.label': 'Synchroniser Longwave',
+  'logbook.longwave.sync.busy': 'Synchronisation de Longwave...',
+  'logbook.longwave.sync.title': 'Importer le carnet Longwave enregistré dans le journal local. Les contacts locaux existants sont conservés.',
+  'logbook.longwave.sync.done': 'Longwave : {{added}} ajoutés, {{updated}} mis à jour, {{skipped}} déjà présents.',
+  'logbook.longwave.sync.failed': 'Échec de la synchronisation Longwave : {{detail}}',
+  'logbook.longwave.push.label': 'Envoyer à Longwave',
+  'logbook.longwave.push.busy': 'Envoi à Longwave...',
+  'logbook.longwave.push.title': 'Envoyer {{call}} au carnet Longwave enregistré',
+  'logbook.longwave.push.blocked': 'Déjà envoyé ou non confirmé. Vérifiez Longwave avant de renvoyer.',
+  'logbook.longwave.pending': 'Non confirmé. Synchronisez l’historique et vérifiez Longwave avant de renvoyer.',
+  'logbook.longwave.push.done': 'Longwave : {{call}} — {{state}}',
+  'logbook.longwave.push.failed': 'Échec de l’envoi Longwave : {{detail}}. Vérifiez Longwave avant de renvoyer.',
   "settings.longwave.title": "Longwave",
   "settings.longwave.url.label": "URL du serveur",
   "settings.longwave.token.label": "Jeton client",
