@@ -2312,7 +2312,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
                 radio, and the operator would go looking for a fault that is not there. */}
             {show('NOTCHF') && (
             <div className="ph-chain-item" data-chain="NOTCHF">
-              <label className="ph-dsplev" title={t(rawNotch ? 'phone.rxDsp.notchPosition.aria' : 'phone.rxDsp.notchFreq.title')}>
+              <label className="ph-dsplev" title={rawNotch ? t('phone.rxDsp.notchPosition.aria') : t('phone.rxDsp.notchFreq.title')}>
                 <span>{NOTCH}</span>
                 <WheelRange wheelStep={rawNotch ? 1 : 10} disabled={dead('NOTCHF')}
                   aria-describedby={describedBy('rx')}
@@ -2328,7 +2328,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
                   onPointerUp={() => {
                     notchDragging.current = false
                   }}
-                  aria-label={t(rawNotch ? 'phone.rxDsp.notchPosition.aria' : 'phone.rxDsp.notchFreq.aria')}
+                  aria-label={rawNotch ? t('phone.rxDsp.notchPosition.aria') : t('phone.rxDsp.notchFreq.aria')}
                 />
                 <span className="ph-power-val">{dead('NOTCHF') ? '—' : rawNotch ? `${shownNotch} / 255` : `${shownNotch} ${HZ}`}</span>
               </label>
