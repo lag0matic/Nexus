@@ -5897,7 +5897,7 @@ mod receivers_dto_tests {
             notch,
             manual_notch: mn,
             notch_freq_hz: Some(1_234.0),
-            notch_position_raw: None,
+            notch_position_raw: Some(127),
             rf_gain: Some(0.375),
             squelch: Some(0.625),
             att_db: Some(12),
@@ -5942,6 +5942,7 @@ mod receivers_dto_tests {
                 "notch": r.notch,
                 "manualNotch": r.manual_notch,
                 "notchFreqHz": 1234.0,
+                "notchPositionRaw": 127,
                 "rfGain": 0.375,
                 "squelch": 0.625,
                 "attDb": 12,
@@ -6047,6 +6048,7 @@ mod receivers_dto_tests {
         r.notch = None;
         r.manual_notch = None;
         r.notch_freq_hz = None;
+        r.notch_position_raw = None;
         r.rf_gain = None;
         r.squelch = None;
         r.att_db = None;
