@@ -401,7 +401,7 @@ CREATE TABLE IF NOT EXISTS qso_extra (
 -- Replaces the four per-service column groups.
 CREATE TABLE IF NOT EXISTS qso_upload (
   qso_id  TEXT NOT NULL REFERENCES qso(id) ON DELETE CASCADE,
-  service TEXT NOT NULL,              -- lotw | eqsl | qrz | clublog
+  service TEXT NOT NULL,              -- lotw | eqsl | qrz | clublog | longwave
   outcome TEXT NOT NULL,
   when_unix INTEGER,
   detail  TEXT,
@@ -2250,7 +2250,7 @@ fn stamp_of(code: &str, when_unix: Option<i64>, detail: Option<&str>) -> Option<
     })
 }
 
-/// Which of a record's four stamps a `qso_upload` row's `service` names — `None` for a service
+/// Which of a record's stamps a `qso_upload` row's `service` names — `None` for a service
 /// this build does not know, whose row is read and set nowhere.
 fn stamp_slot<'a>(u: &'a mut UploadState, service: &str) -> Option<&'a mut Option<UploadStatus>> {
     match service {
@@ -2258,17 +2258,19 @@ fn stamp_slot<'a>(u: &'a mut UploadState, service: &str) -> Option<&'a mut Optio
         "eqsl" => Some(&mut u.eqsl),
         "qrz" => Some(&mut u.qrz),
         "clublog" => Some(&mut u.clublog),
+        "longwave" => Some(&mut u.longwave),
         _ => None,
     }
 }
 
-/// The four connectors that leave a per-QSO stamp, and the token each is stored under.
-fn upload_states(u: &UploadState) -> [(&'static str, &Option<UploadStatus>); 4] {
+/// The connectors that leave a per-QSO stamp, and the token each is stored under.
+fn upload_states(u: &UploadState) -> [(&'static str, &Option<UploadStatus>); 5] {
     [
         ("lotw", &u.lotw),
         ("eqsl", &u.eqsl),
         ("qrz", &u.qrz),
         ("clublog", &u.clublog),
+        ("longwave", &u.longwave),
     ]
 }
 
@@ -2747,6 +2749,10 @@ mod tests {
             ("APP_TEMPO_UL_EQSL", &["pending|1700000002|"]),
             ("APP_TEMPO_UL_QRZ", &["authfail|1700000003|credentials"]),
             ("APP_TEMPO_UL_CLUBLOG", &["duplicate|1700000004|"]),
+            (
+                "APP_TEMPO_UL_LONGWAVE",
+                &["pending|1700000005|", "accepted|1700000006|"],
+            ),
         ] {
             if g.chance(3) {
                 tag(name, g.pick(vals));

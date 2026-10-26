@@ -25,7 +25,7 @@
 
 use super::{Logbook, OpClass, QslVia, QsoRecord, RecordId, UploadStatus};
 
-/// Which connector a stamp is for. `UploadState` holds the four as fields; an op has to be
+/// Which connector a stamp is for. `UploadState` holds these as fields; an op has to be
 /// able to name one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UploadService {
@@ -33,6 +33,7 @@ pub enum UploadService {
     Eqsl,
     Qrz,
     Clublog,
+    Longwave,
 }
 
 /// What an op did, by id. Empty when it matched nothing — an id that names no row is not an

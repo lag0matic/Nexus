@@ -966,7 +966,7 @@ pub struct SourceHealth {
     pub last_failure_detail: Option<UploadDetail>,
 }
 
-/// [`Logbook::upload_health`] for the four connectors that leave a per-QSO stamp.
+/// [`Logbook::upload_health`] for the connectors that leave a per-QSO stamp.
 /// HRDLog.net and Cloudlog are not here: they have no `UploadState` field, so their
 /// health is session-only and lives in the orchestration layer.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -975,6 +975,7 @@ pub struct UploadHealth {
     pub eqsl: SourceHealth,
     pub qrz: SourceHealth,
     pub clublog: SourceHealth,
+    pub longwave: SourceHealth,
 }
 
 impl UploadHealth {
@@ -983,16 +984,24 @@ impl UploadHealth {
     /// runs the same rule; of two failures at one instant the first in the log names the why.
     pub fn add(&mut self, r: &QsoRecord) {
         for (src, status) in [
-            (&mut self.lotw, &r.upload.lotw),
-            (&mut self.eqsl, &r.upload.eqsl),
-            (&mut self.qrz, &r.upload.qrz),
-            (&mut self.clublog, &r.upload.clublog),
+            (&mut self.lotw, r.upload.lotw.as_ref()),
+            (&mut self.eqsl, r.upload.eqsl.as_ref()),
+            (&mut self.qrz, r.upload.qrz.as_ref()),
+            (&mut self.clublog, r.upload.clublog.as_ref()),
+            // Longwave Pending is a pre-POST intent or an uncertain response, not a receipt.
+            (
+                &mut self.longwave,
+                r.upload
+                    .longwave
+                    .as_ref()
+                    .filter(|s| s.outcome != UploadOutcome::Pending),
+            ),
         ] {
             // `when_unix == 0` is not a date. The ADIF reader synthesises an
             // `Accepted` stamp for any imported record carrying `LOTW_QSL_SENT=Y`,
             // with no time to give it — counting those would tell every operator with
             // an imported legacy log that their last LoTW upload was 1 Jan 1970.
-            let Some(s) = status.as_ref().filter(|s| s.when_unix > 0) else {
+            let Some(s) = status.filter(|s| s.when_unix > 0) else {
                 continue;
             };
             if s.outcome.is_sent() {
@@ -1033,6 +1042,8 @@ pub struct UploadState {
     pub eqsl: Option<UploadStatus>,
     pub qrz: Option<UploadStatus>,
     pub clublog: Option<UploadStatus>,
+    /// Upload receipt only, never evidence of a confirmed QSL.
+    pub longwave: Option<UploadStatus>,
 }
 
 impl UploadState {
@@ -1053,6 +1064,7 @@ impl UploadState {
         pick(&mut self.eqsl, &other.eqsl);
         pick(&mut self.qrz, &other.qrz);
         pick(&mut self.clublog, &other.clublog);
+        pick(&mut self.longwave, &other.longwave);
     }
 }
 
@@ -2455,6 +2467,12 @@ impl Logbook {
         self.stamp_pushed(pushed, UploadService::Eqsl, status)
     }
 
+    /// Stamp a Longwave push outcome. `Pending` means receipt is uncertain; `Accepted`
+    /// means a receipt, not a confirmed QSL. Pure - call `save` to persist.
+    pub fn stamp_longwave_upload(&mut self, pushed: &QsoRecord, status: UploadStatus) -> bool {
+        self.stamp_pushed(pushed, UploadService::Longwave, status)
+    }
+
     /// What actually happened, per connector, the last time Nexus talked to it.
     ///
     /// The Settings ▸ Connections panel used to answer a different question than the one
@@ -3258,6 +3276,7 @@ pub(crate) fn stamped(rec: &mut QsoRecord, service: UploadService, status: Uploa
         UploadService::Eqsl => &mut rec.upload.eqsl,
         UploadService::Qrz => &mut rec.upload.qrz,
         UploadService::Clublog => &mut rec.upload.clublog,
+        UploadService::Longwave => &mut rec.upload.longwave,
     };
     *slot = Some(status);
 }
@@ -3570,6 +3589,7 @@ fn adif_record_for(r: &QsoRecord, audience: Audience) -> String {
     out.push_str(&upload_field("APP_TEMPO_UL_EQSL", &r.upload.eqsl));
     out.push_str(&upload_field("APP_TEMPO_UL_QRZ", &r.upload.qrz));
     out.push_str(&upload_field("APP_TEMPO_UL_CLUBLOG", &r.upload.clublog));
+    out.push_str(&upload_field("APP_TEMPO_UL_LONGWAVE", &r.upload.longwave));
     // Parks/Summits On The Air — standard ADIF so pota.app / the SOTA DB accept the
     // export. POTA (and WWFF) → SIG/SIG_INFO; SOTA → its dedicated *_SOTA_REF fields.
     out.push_str(&ota_fields(
@@ -4896,6 +4916,7 @@ fn record_from(mut f: std::collections::HashMap<String, String>) -> Option<QsoRe
         eqsl: take_upload(f, "APP_TEMPO_UL_EQSL"),
         qrz: take_upload(f, "APP_TEMPO_UL_QRZ"),
         clublog: take_upload(f, "APP_TEMPO_UL_CLUBLOG"),
+        longwave: take_upload(f, "APP_TEMPO_UL_LONGWAVE"),
     };
     let (my_program, my_ref) =
         take_ota_side(f, "MY_SIG", "MY_SIG_INFO", "MY_SOTA_REF", "MY_POTA_REF");
@@ -5351,13 +5372,16 @@ mod tests {
     fn a_stamp_lands_on_the_contact_that_was_pushed_not_on_a_newer_twin() {
         type Stamp = fn(&mut Logbook, &QsoRecord, UploadStatus) -> bool;
         type Stamped = fn(&QsoRecord) -> bool;
-        let services: [(&str, Stamp, Stamped); 3] = [
+        let services: [(&str, Stamp, Stamped); 4] = [
             ("QRZ", Logbook::stamp_qrz_upload, |r| r.upload.qrz.is_some()),
             ("ClubLog", Logbook::stamp_clublog_upload, |r| {
                 r.upload.clublog.is_some()
             }),
             ("eQSL", Logbook::stamp_eqsl_upload, |r| {
                 r.upload.eqsl.is_some()
+            }),
+            ("Longwave", Logbook::stamp_longwave_upload, |r| {
+                r.upload.longwave.is_some()
             }),
         ];
         let status = || UploadStatus {

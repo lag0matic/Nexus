@@ -3760,6 +3760,8 @@ pub struct UploadStateDto {
     pub qrz: Option<UploadStatusDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clublog: Option<UploadStatusDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub longwave: Option<UploadStatusDto>,
 }
 
 impl From<tempo_core::logbook::UploadStatus> for UploadStatusDto {
@@ -3791,6 +3793,7 @@ impl From<tempo_core::logbook::UploadState> for UploadStateDto {
             eqsl: u.eqsl.map(Into::into),
             qrz: u.qrz.map(Into::into),
             clublog: u.clublog.map(Into::into),
+            longwave: u.longwave.map(Into::into),
         }
     }
 }
@@ -3801,6 +3804,7 @@ impl From<UploadStateDto> for tempo_core::logbook::UploadState {
             eqsl: u.eqsl.map(Into::into),
             qrz: u.qrz.map(Into::into),
             clublog: u.clublog.map(Into::into),
+            longwave: u.longwave.map(Into::into),
         }
     }
 }
@@ -5305,6 +5309,37 @@ pub const WINLINK_OUTCOMES: [&str; 4] = ["complete", "stopped", "peerClosed", "i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn longwave_upload_round_trips_logged_qso_and_defaults_on_old_wire_records() {
+        use tempo_core::logbook::{parse_adif, QsoRecord, UploadOutcome, UploadStatus};
+        let mut row = parse_adif("<CALL:4>W1AW<BAND:3>20m<MODE:3>FT8<EOR>").remove(0);
+        for outcome in [UploadOutcome::Pending, UploadOutcome::Accepted] {
+            row.upload.longwave = Some(UploadStatus {
+                outcome,
+                when_unix: 200,
+                detail: None,
+            });
+            let dto = LoggedQso::from(row.clone());
+            let mut wire = serde_json::to_value(&dto).unwrap();
+            assert_eq!(wire["upload"]["longwave"]["outcome"], outcome.code());
+            let back: QsoRecord = serde_json::from_value::<LoggedQso>(wire.clone())
+                .unwrap()
+                .into();
+            assert_eq!(back.upload, row.upload);
+            assert!(!back.confirmed && !back.award_confirmed && !back.qsl_rcvd.any());
+            wire["upload"].as_object_mut().unwrap().remove("longwave");
+            let old: QsoRecord = serde_json::from_value::<LoggedQso>(wire).unwrap().into();
+            assert_eq!(old.upload.longwave, None);
+        }
+        let old: UploadStateDto = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.longwave, None);
+        assert!(!serde_json::to_value(old)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("longwave"));
+    }
 
     /// ⭐ **A received slot tells the strip its bounds and what it MEANS.** A CQ zone box
     /// had no way to refuse 41, and the country file's zone hint had no way to find the

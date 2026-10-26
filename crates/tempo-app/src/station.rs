@@ -4734,6 +4734,24 @@ impl StationCore {
         self.stamp_push(pushed, settings_call, UploadService::Eqsl, status)
     }
 
+    /// Record a Longwave push outcome through the same planned stamp as other connectors.
+    /// A receipt (`Accepted`) does not confirm a QSL; an uncertain POST stays `Pending`.
+    pub fn stamp_longwave_upload(
+        &mut self,
+        pushed: &QsoRecord,
+        settings_call: Option<&str>,
+        outcome: tempo_core::logbook::UploadOutcome,
+        when_unix: i64,
+        detail: Option<tempo_core::logbook::UploadDetail>,
+    ) -> bool {
+        let status = tempo_core::logbook::UploadStatus {
+            outcome,
+            when_unix,
+            detail,
+        };
+        self.stamp_push(pushed, settings_call, UploadService::Longwave, status)
+    }
+
     /// Stamp a connector's answer for the QSO it was pushed (`pushed`) on the row that push
     /// names ([`push_target`]), in one breath: planned on the store, made under the lock the
     /// caller holds, planned again while the row keeps changing. Whether a record was stamped.

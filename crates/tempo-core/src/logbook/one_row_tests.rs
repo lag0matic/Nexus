@@ -311,6 +311,7 @@ mod vec_bodies {
                     super::UploadService::Eqsl => &mut row.upload.eqsl,
                     super::UploadService::Qrz => &mut row.upload.qrz,
                     super::UploadService::Clublog => &mut row.upload.clublog,
+                    super::UploadService::Longwave => &mut row.upload.longwave,
                 };
                 *slot = Some(status);
                 true
@@ -425,6 +426,7 @@ fn row(rng: &mut Rng) -> QsoRecord {
             eqsl: rng.chance(30).then(|| status(rng)),
             qrz: rng.chance(30).then(|| status(rng)),
             clublog: rng.chance(30).then(|| status(rng)),
+            longwave: rng.chance(30).then(|| status(rng)),
         },
         ota: Ota {
             my_program: rng.maybe(&["POTA", "SOTA"]),
@@ -505,6 +507,7 @@ fn op_on(lb: &Logbook, at: usize, rng: &mut Rng) -> LogOp {
                 UploadService::Eqsl,
                 UploadService::Qrz,
                 UploadService::Clublog,
+                UploadService::Longwave,
             ]),
             status: status(rng),
         },
