@@ -99,6 +99,54 @@ function makeSnap(radio: Record<string, unknown> = {}): AppSnapshot {
   } as unknown as AppSnapshot
 }
 const renderPhone = () => render(<PhoneCockpit snap={makeSnap()} theme="dark" onWorkSpot={() => {}} spots={[]} />)
+
+describe('desktop microphone PTT', () => {
+  const phone = (radio: Record<string, unknown> = {}) => <PhoneCockpit snap={makeSnap({ phoneDesktopMic: true, ...radio })} theme="dark" onWorkSpot={() => {}} spots={[]} />
+
+  it('waits for audio, reports keyed, and releases normally', async () => {
+    setPtt.mockResolvedValue(makeSnap({ streamMic: 'armed', phoneDesktopMic: true }))
+    const view = render(phone())
+    fireEvent.pointerDown(ptt())
+    await settle()
+    expect(setPtt).toHaveBeenLastCalledWith(true)
+    expect(ptt().textContent).toBe('Armed — talk to transmit')
+    view.rerender(phone({ streamMic: 'keyed' }))
+    expect(ptt().textContent).toBe('ON AIR — release to stop')
+    fireEvent.pointerUp(ptt())
+    await settle()
+    expect(setPtt).toHaveBeenLastCalledWith(false)
+    expect(ptt().textContent).toBe('PUSH TO TALK')
+    expect(armStreamMic).not.toHaveBeenCalled()
+  })
+
+  it('does not show on-air when capture is refused', async () => {
+    setPtt.mockResolvedValue(makeSnap({ streamMic: null, phoneDesktopMic: true }))
+    render(phone())
+    fireEvent.pointerDown(ptt())
+    await settle()
+    expect(ptt().textContent).toBe('PUSH TO TALK')
+    expect(pushToast).toHaveBeenCalledWith(expect.stringContaining('could not start'), 'error')
+  })
+
+  it('releases an uncertain arm when the command reply fails', async () => {
+    setPtt.mockRejectedValueOnce(new Error('reply lost')).mockResolvedValue(makeSnap())
+    render(phone())
+    fireEvent.pointerDown(ptt())
+    await settle()
+    expect(setPtt.mock.calls.slice(-2)).toEqual([[true], [false]])
+    expect(ptt().textContent).toBe('PUSH TO TALK')
+  })
+
+  it('drops the held display when the backend stops a disconnected microphone', async () => {
+    setPtt.mockResolvedValue(makeSnap({ streamMic: 'armed', phoneDesktopMic: true }))
+    const view = render(phone())
+    fireEvent.pointerDown(ptt())
+    await settle()
+    view.rerender(phone({ streamMic: 'keyed' }))
+    view.rerender(phone({ streamMic: null }))
+    expect(ptt().textContent).toBe('PUSH TO TALK')
+  })
+})
 const ptt = () => document.querySelector('.ph-ptt') as HTMLButtonElement
 const lockBox = () => document.querySelector('.ph-lock input') as HTMLInputElement
 /** Let the cockpit's chained microphone calls settle. */

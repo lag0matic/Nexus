@@ -2415,6 +2415,28 @@ export async function clearCloudlogKey(): Promise<void> {
   await invoke<void>('clear_cloudlog_key')
 }
 
+/** Longwave credentials never enter Settings or the browser's persisted state. */
+export async function setLongwaveToken(token: string): Promise<void> {
+  await invoke<void>('set_longwave_token', { token })
+}
+
+export async function clearLongwaveToken(): Promise<void> {
+  await invoke<void>('clear_longwave_token')
+}
+
+export interface LongwaveLogbook {
+  id: string
+  name: string
+  operator_callsign: string
+  park_reference?: string | null
+  contact_count: number
+}
+
+/** Explicit, read-only connection test against the URL being configured. */
+export async function getLongwaveLogbooks(url: string): Promise<LongwaveLogbook[]> {
+  return invoke<LongwaveLogbook[]>('longwave_logbooks', { url })
+}
+
 /** Need-aware spotting: the stations heard now, ranked by award value. */
 export async function getNeedAlerts(): Promise<NeedAlert[]> {
   return invoke<NeedAlert[]>('get_need_alerts')

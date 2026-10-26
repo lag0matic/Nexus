@@ -106,6 +106,7 @@
     "nr": null,
     "nrLevel": null,
     "operatingMode": "digital",
+    "phoneDesktopMic": false,
     "phoneSegHi": null,
     "phoneSegLo": null,
     "preampDb": null,

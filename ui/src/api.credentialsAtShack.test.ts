@@ -50,6 +50,8 @@ const CREDENTIALS: [string, () => Promise<unknown>][] = [
   ['clear_wrl_key', () => api.clearWrlKey()],
   ['set_cloudlog_key', () => api.setCloudlogKey('fake-key')],
   ['clear_cloudlog_key', () => api.clearCloudlogKey()],
+  ['set_longwave_token', () => api.setLongwaveToken('test-token')],
+  ['clear_longwave_token', () => api.clearLongwaveToken()],
   ['set_repeaterbook_token', () => api.setRepeaterbookToken('fake-token')],
 ]
 

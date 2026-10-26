@@ -33,6 +33,7 @@ export const SERVICE_NAMES: Record<string, string> = {
   hrdlog: 'HRDLog',
   n3fjp: 'N3FJP',
   cloudlog: 'Cloudlog',
+  longwave: 'Longwave',
   wrl: 'WRL',
 }
 

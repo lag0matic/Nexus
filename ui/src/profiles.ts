@@ -39,6 +39,7 @@ export interface Profile {
 const NEVER_IMPORT: readonly string[] = [
   'mycall',
   'licenseClass',
+  'phoneDesktopMic',
   'radios',
   'activeRadio',
   'qrzLastSyncUnix',
@@ -81,6 +82,7 @@ const NEVER_IMPORT: readonly string[] = [
   'hrdlogUpload',
   'wrlUpload',
   'cloudlogUpload',
+  'longwaveUpload',
   'lotwAutoUpload',
   // The PUSHES TO THE OTHER LOGGING PROGRAMS on your network, the same family (the operator's
   // ruling: profiles leave them alone too): HRD Logbook forwarding, N3FJP's and N1MM+'s every-QSO

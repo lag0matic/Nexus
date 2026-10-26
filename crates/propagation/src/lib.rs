@@ -69,6 +69,10 @@ pub mod wwff;
 #[cfg(feature = "live")]
 pub mod live;
 
+/// Longwave logging transport, also available without the native radio stack.
+#[cfg(feature = "longwave")]
+pub mod longwave;
+
 pub use achievements::Achievement;
 pub use advisor::{BandReport, PropAdvisor, PropAdvisory, RegionReport};
 pub use awards::{

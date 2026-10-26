@@ -1,9 +1,9 @@
 # Phone (SSB)
 
 The Phone cockpit is a traditional rig-panel experience for voice operating —
-SSB on HF and FM for VHF/UHF and repeaters. It doesn't try to reinvent voice —
-you talk on the rig's own mic — but it gives you the shack-monitor conveniences a
-modern app should: live dial read-back, a fast colored bandscope, a voice keyer
+SSB on HF and FM for VHF/UHF and repeaters. Talk on the rig's own mic, or select
+a desktop microphone in Settings. The cockpit provides live dial read-back,
+a fast colored bandscope, a voice keyer
 for the calls you make over and over, and crash-safe QSO recording, all with your
 logbook and license privileges wired in.
 
@@ -176,10 +176,27 @@ Boxes are not shown on Nexus Remote.
    - or let the configured rig method key it (CAT, serial RTS/DTR, or VOX) — set
      in [Settings ▸ Radio ▸ Rig & CAT](settings-reference.md#rig--cat).
    For hands-free operating, toggle **Lock**.
-3. Talk on the rig's microphone. Nexus handles the canned messages, recording,
-   scope, and CAT/PTT — the voice path itself is the rig's own mic.
+3. Talk on the selected microphone. The default is the rig's microphone; for a
+   computer microphone, follow [Talk from the desktop](#talk-from-the-desktop).
 4. The cockpit **unconditionally drops PTT when you navigate away**, so there is
    no stuck-transmitter path.
+
+### Talk from the desktop
+
+1. In **Settings > Phone > Microphone**, set **Live voice source** to
+   **Desktop microphone** and select the actual microphone input. Save normally.
+2. Check that the radio audio output in Settings targets the radio's USB codec,
+   and set the radio's voice modulation source to accept USB/data audio. SSB,
+   FM and AM can have separate source settings on the radio.
+3. Hold the existing PTT button or Space bar. The button reads **Armed** until
+   audio arrives, then reports the keyed state. Release to stop. The microphone
+   opens only for PTT or voice-message recording.
+
+A missing microphone refuses the transmission. Lost capture, Stop TX, TX Off,
+or a transmit-route change ends it and flushes queued audio; received radio audio
+is never substituted. Recovery requires another PTT press. To return to the
+rig's microphone, select **Radio microphone** and restore its modulation source
+on the radio if needed. Changing the source or microphone during an over ends it.
 
 ### Talk from Remote
 
@@ -291,11 +308,11 @@ License-class enforcement hard-blocks PTT outside your privileges — see
 
 ## Honest limits
 
-- **No live mic-through-app audio bridge at the shack.** You use the rig's mic for
-  live voice; Nexus handles canned messages, recording, the scope, and CAT/PTT —
-  not a software voice path to the transmitter. This applies to SSB and FM alike.
-  The one exception is [Remote](#talk-from-remote), where your browser's
-  microphone is the voice, and the rig has to take its audio from USB for it.
+- **The radio must accept the selected audio source.** Desktop and Remote voice
+  use the configured transmit audio output, not the radio's front microphone.
+  Nexus does not silently change the radio's modulation-source menu for you.
+  Keep the transmit drive conservative and verify the audio and PTT release at
+  low power before normal operation.
 
 ## Related guides
 

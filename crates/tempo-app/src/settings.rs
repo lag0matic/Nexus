@@ -2736,6 +2736,9 @@ pub struct Settings {
     /// A configured device that fails to open falls back to the shared input.
     #[serde(default)]
     pub voice_mic_device: String,
+    /// Local Phone PTT carries the explicitly selected desktop microphone. Off for old files.
+    #[serde(default)]
+    pub phone_desktop_mic: bool,
     /// Tx audio level (0.0–1.0) applied to outgoing samples before they reach
     /// the sound card.
     pub tx_level: f32,
@@ -3593,6 +3596,13 @@ pub struct Settings {
     /// Auto-forward each logged QSO to the Cloudlog/Wavelog instance above. Off by default.
     #[serde(default)]
     pub cloudlog_upload: bool,
+    /// Longwave instance URL and selected logbook. The client token is keychain-only.
+    #[serde(default)]
+    pub longwave_url: String,
+    #[serde(default)]
+    pub longwave_logbook_id: String,
+    #[serde(default)]
+    pub longwave_upload: bool,
 
     /// Watch near-region spots (not just your own paths) so opening detection can
     /// flag "a band is open around you" before you've worked anyone. On by default;
@@ -6000,6 +6010,7 @@ impl Default for Settings {
             audio_in: String::new(),
             audio_out: String::new(),
             voice_mic_device: String::new(),
+            phone_desktop_mic: false,
             tx_level: 0.9,
             rx_gain: 1.0,
             monitor_enabled: false,
@@ -6140,6 +6151,9 @@ impl Default for Settings {
             cloudlog_station_id: String::new(),
             cloudlog_key: String::new(),
             cloudlog_upload: false,
+            longwave_url: String::new(),
+            longwave_logbook_id: String::new(),
+            longwave_upload: false,
             opening_regional: true,
             macros: Macros::default(),
             voice_messages: default_voice_messages(),

@@ -27,9 +27,12 @@ sgp4 = { version = "2.4", default-features = false, features = ["std"] }
 # intelligence stays dependency-light and unit-testable without a network.
 # `gzip` for the hearham.com repeater directory (~9 MB uncompressed, ~1 MB gzipped).
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "gzip"], optional = true }
+# Already used by reqwest and the station's pinned LAN transport; same ring provider.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"], optional = true }
 quick-xml = { version = "0.41", optional = true }
 # Pure eQSL URL/page/href/validate helpers, used only by the live eQSL transport.
 tempo-core = { path = "../tempo-core", optional = true }
+tempo-base = { path = "../tempo-base", optional = true }
 # HRDLog.net's upload host offers no cipher suite rustls supports, so live/hrdlog.rs speaks TLS
 # through the OS stack (SChannel / Security.framework / OpenSSL) with this crate DIRECTLY, locked
 # to that one host. NOT reqwest's `native-tls` feature: that would move every reqwest client in
@@ -40,7 +43,9 @@ httparse = { version = "1", optional = true }
 
 [features]
 default = []
-live = ["dep:reqwest", "dep:quick-xml", "dep:tempo-core", "dep:native-tls", "dep:httparse"]
+live = ["longwave", "dep:reqwest", "dep:quick-xml", "dep:tempo-core", "dep:native-tls", "dep:httparse"]
+# Test the HTTP connector without building the native radio/DSP stack.
+longwave = ["dep:reqwest", "dep:tempo-base", "dep:rustls"]
 
 [[example]]
 name = "live_snapshot"
@@ -49,3 +54,7 @@ required-features = ["live"]
 [[example]]
 name = "dxped_calendar"
 required-features = ["live"]
+
+[[example]]
+name = "longwave_tls_probe"
+required-features = ["longwave"]

@@ -99,6 +99,7 @@ mod cw_unassisted_tests;
 /// A CW message the radio's own keyer would not take is refused whole, before anything keys.
 #[cfg(test)]
 mod cw_whole_message_tests;
+mod desktop_mic;
 mod field_day_display;
 /// WSJT-X's mid-over message switch for FT8 and FT4 (`m_restart`).
 pub mod ft_midover;
@@ -2682,7 +2683,8 @@ pub mod upload_legs {
     pub const N3FJP: u8 = 1 << 4;
     pub const CLOUDLOG: u8 = 1 << 5;
     pub const WRL: u8 = 1 << 6;
-    pub const ALL: u8 = QRZ | CLUBLOG | EQSL | HRDLOG | N3FJP | CLOUDLOG | WRL;
+    pub const LONGWAVE: u8 = 1 << 7;
+    pub const ALL: u8 = QRZ | CLUBLOG | EQSL | HRDLOG | N3FJP | CLOUDLOG | WRL | LONGWAVE;
 
     /// The leg mask for a list of connector ids — a contest session's DESTINATION
     /// logbooks (§18.1).
@@ -2700,6 +2702,7 @@ pub mod upload_legs {
                 "n3fjp" => N3FJP,
                 "cloudlog" => CLOUDLOG,
                 "wrl" => WRL,
+                "longwave" => LONGWAVE,
                 _ => 0,
             }
         })
@@ -2708,7 +2711,7 @@ pub mod upload_legs {
     /// Every id [`mask_for`] understands — the destination list the session control
     /// offers, so the picker and the mask cannot come to disagree about what exists.
     pub const IDS: &[&str] = &[
-        "qrz", "clublog", "eqsl", "hrdlog", "n3fjp", "cloudlog", "wrl",
+        "qrz", "clublog", "eqsl", "hrdlog", "n3fjp", "cloudlog", "wrl", "longwave",
     ];
 }
 
@@ -3870,6 +3873,7 @@ pub struct Engine {
     /// The streamed operator's microphone over, and what it needs: see `engine/remote_mic.rs`.
     mic: crate::mic::MicLatch,
     mic_feed: Option<crate::mic::MicFeed>,
+    desktop_mic: Option<desktop_mic::DesktopMic>,
     /// The presence permit the over armed under: G5 is "presence, for THIS over".
     mic_presence: Option<crate::remote_control::transmit::TransmitPermit>,
     /// One-shot microphone abort: the loop flushes the output ring + unkeys, then clears it.
@@ -6603,6 +6607,7 @@ impl Engine {
             remote_tx_hold_shown: None,
             mic: crate::mic::MicLatch::default(),
             mic_feed: None,
+            desktop_mic: None,
             mic_presence: None,
             mic_abort: false,
             mic_end: None,
@@ -7017,6 +7022,11 @@ impl Engine {
     }
 
     fn apply_settings_inner(&mut self, s: Settings, keep_live_roster: bool) {
+        if s.phone_desktop_mic != self.settings.phone_desktop_mic
+            || s.voice_mic_device != self.settings.voice_mic_device
+        {
+            self.set_ptt(false);
+        }
         self.remote_readings.invalidate();
         // The address the club link line is about, before the save: a save that moves it
         // starts the line afresh at the end of this function.
@@ -11945,6 +11955,13 @@ impl Engine {
     /// Manually key (true) / unkey (false) the rig for live phone. Gated by Monitor:
     /// a key request is ignored while TX is disabled. The radio loop applies it.
     pub fn set_ptt(&mut self, on: bool) {
+        if !on && self.desktop_mic.is_some() {
+            self.drop_mic_latch_for(crate::mic::MicEnded::Released);
+        }
+        if on && (self.settings.phone_desktop_mic || self.desktop_mic.is_some()) {
+            self.arm_desktop_mic(std::time::Instant::now());
+            return;
+        }
         // A clock repair holds transmit: a new key is refused, and one already held is never
         // dropped by it ([`Self::hold_tx_for_clock_repair`]).
         if on && !self.manual_ptt && self.clock_repair_holds_tx() {
@@ -27581,6 +27598,7 @@ contact yourself."
         // What the Phone cockpit's PTT and the header's ON AIR sign show of a streamed microphone
         // over; display only. `Armed` only while that over owns the transmitter: anything the
         // arbiter names before it (an FT over, the tune carrier, a key at the shack) is on the air.
+        s.radio.phone_desktop_mic = self.settings.phone_desktop_mic;
         s.radio.stream_mic = if self.mic.keyed() {
             Some(crate::dto::StreamMic::Keyed)
         } else if self.mic.active() && self.tx_owner() == Some(TxOwner::Mic) {

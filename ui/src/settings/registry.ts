@@ -352,7 +352,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     tab: 'phone',
     neededInHourOne: true,
     keywords: ['ssb', 'usb', 'lsb', 'voice', 'fm', 'repeater', 'shift', 'offset', 'ctcss',
-      'pl tone', 'tone', 'mic', 'microphone', 'voice keyer'],
+      'pl tone', 'tone', 'mic', 'microphone', 'voice keyer', 'desktop microphone', 'live voice source'],
   },
   {
     id: 'cw',
@@ -577,7 +577,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     label: 'Confirmations',
     tab: 'logging',
     neededInHourOne: true,
-    keywords: ['lotw', 'eqsl', 'qrz', 'clublog', 'club log', 'hrdlog', 'cloudlog', 'wavelog',
+    keywords: ['lotw', 'eqsl', 'qrz', 'clublog', 'club log', 'hrdlog', 'cloudlog', 'wavelog', 'longwave',
       'hamqth', 'qsl', 'upload', 'auto-upload', 'password', 'api key', 'credential', 'login',
       'repeaterbook', 'tqsl', 'station location',
       'wrl', 'world radio league', 'qth nickname', 'nickname',

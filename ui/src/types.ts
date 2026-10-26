@@ -1606,6 +1606,7 @@ export interface RadioStatus {
    * sign waits while it says `armed`, which the station says only while that over owns the
    * transmitter. */
   streamMic?: 'armed' | 'keyed' | null
+  phoneDesktopMic?: boolean
   /** True if the TX watchdog has auto-halted transmit (needs a re-enable). */
   txWatchdog: boolean
   /** The radio did not accept the key for a slot over (FT8, FT4, JS8 …), so it was not sent and
@@ -3325,7 +3326,7 @@ export interface CallHistoryFile {
  *  `null` — declared `| null`, not `?:`. */
 export interface CredStatus {
   /** Stable slug: 'lotw' | 'qrz-xml' | 'qrz-logbook' | 'eqsl' | 'clublog' | 'hrdlog' | 'wrl' |
-   *  'cloudlog' | 'repeaterbook' | 'winlink'. Branch on THIS, never on `connector` (a display label). */
+   *  'cloudlog' | 'longwave' | 'repeaterbook' | 'winlink'. Branch on THIS, never on `connector` (a display label). */
   id: string
   /** Display label. */
   connector: string
@@ -5037,6 +5038,7 @@ export interface Settings {
    * recording opens a separate input on it; a device that fails to open falls back to
    * the shared input. The decode path is never affected. */
   voiceMicDevice?: string
+  phoneDesktopMic?: boolean
   /** Transmit drive level, 0–1 (default 0.9). */
   txLevel: number
   /** RX capture gain, ≥1.0 multiplier on received audio before decode (default 1.0). */
@@ -5324,6 +5326,10 @@ export interface Settings {
   cloudlogStationId?: string
   /** Auto-forward each logged QSO to the Cloudlog/Wavelog instance above. */
   cloudlogUpload?: boolean
+  /** Longwave client token is write-only and held in the OS keychain. */
+  longwaveUrl?: string
+  longwaveLogbookId?: string
+  longwaveUpload?: boolean
   /** N1MM contact broadcast target ("host" or "host:port"). Empty = off. */
   n1mmAddr?: string
   /** Broadcast the N1MM contact datagram for EVERY logged QSO, not just Field Day. Default off. */

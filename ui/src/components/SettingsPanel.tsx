@@ -223,6 +223,7 @@ import type { AssistanceEvent, ClubFirewall, ClubLink, ConnEvent, CredStatus, Fi
 import { parsecStatusText, parsecSwitchPlacement } from '../features/parsecPresence'
 import { connState, dotClass, stateLabel, whenText } from '../settings/connHealth'
 import { cloudlogLocationMismatch } from '../settings/cloudlogLocation'
+import { LongwaveSettings } from '../settings/LongwaveSettings'
 import { SettingsStation } from './SettingsStation'
 import { SettingsClusterNodes } from './SettingsClusterNodes'
 import { SettingsStreetMaps } from './SettingsStreetMaps'
@@ -9215,20 +9216,32 @@ export function SettingsPanel({
             <div className="settings-featgroup">
               <span className="settings-featgroup-title">{t('settings.phone.mic.title')}</span>
               <label className="settings-field">
-                <span className="settings-label">{t('settings.phone.voiceMic.label')}</span>
+                <span className="settings-label">{t('settings.phone.mic.source')}</span>
+                <select disabled={locked('phoneDesktopMic')} data-setting="phoneDesktopMic"
+                  className="settings-input"
+                  value={form.phoneDesktopMic ? 'desktop' : 'rig'}
+                  onChange={(e) => updateBool('phoneDesktopMic', e.target.value === 'desktop')}
+                >
+                  <option value="rig">{t('settings.phone.mic.rig')}</option>
+                  <option value="desktop">{t('settings.phone.mic.desktop')}</option>
+                </select>
+                {setAtStation('phoneDesktopMic')}
+              </label>
+              <label className="settings-field">
+                <span className="settings-label">{form.phoneDesktopMic ? t('settings.phone.mic.device') : t('settings.phone.voiceMic.label')}</span>
                 <select
                   className="settings-input"
                   value={form.voiceMicDevice ?? ''}
                   onChange={(e) => update('voiceMicDevice', e.target.value)}
                 >
-                  <option value="">{t('settings.phone.voiceMic.default')}</option>
+                  <option value="">{form.phoneDesktopMic ? t('settings.phone.mic.choose') : t('settings.phone.voiceMic.default')}</option>
                   {voiceMicOptions.map((d) => (
                     <option key={d} value={d}>
                       {audioLabel(d, 'input')}
                     </option>
                   ))}
                 </select>
-                <span className="settings-hint">{t('settings.phone.voiceMic.hint')}</span>
+                <span className="settings-hint">{form.phoneDesktopMic ? t('settings.phone.mic.desktopHint') : t('settings.phone.voiceMic.hint')}</span>
               </label>
               <span className="settings-hint">{t('settings.phone.mic.hint')}</span>
             </div>
@@ -13261,6 +13274,11 @@ export function SettingsPanel({
                 </label>
               </div>
             </div>
+            <LongwaveSettings form={form} remote={locked('longwaveUrl')}
+              onChange={patch => {
+                markDirty()
+                setForm(current => current ? { ...current, ...patch } : current)
+              }} />
             <div className="settings-featgroup">
               <span className="settings-featgroup-title">Cloudlog / Wavelog</span>
               <p className="settings-note">

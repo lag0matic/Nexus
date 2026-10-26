@@ -86,6 +86,7 @@ pub const CLASSES: &[(&str, Class, &str)] = &[
     ("clear_hrdlog_code",              RefusedHere, "Credentials are set at the shack only."),
     ("clear_hunt_target",              RunsAtShack, "Clears the shack's hunt target."),
     ("clear_icom_lan_password",        RefusedHere, "Credentials are set at the shack only."),
+    ("clear_longwave_token",           RefusedHere, "Credentials are set at the shack only."),
     ("clear_lotw_password",            RefusedHere, "Credentials are set at the shack only."),
     ("clear_qrz_logbook_key",          RefusedHere, "Credentials are set at the shack only."),
     ("clear_qrz_password",             RefusedHere, "Credentials are set at the shack only."),
@@ -332,6 +333,7 @@ pub const CLASSES: &[(&str, Class, &str)] = &[
     ("log_operators",                  RunsAtShack, "From the shack's logbook."),
     ("log_qso",                        RunsAtShack, "Logs a contact at the shack."),
     ("logbook_save_choice",            RunsHere,    "This computer's own quit-time question."),
+    ("longwave_logbooks",              RefusedHere, "Configure Longwave at the shack only."),
     ("lookup_park",                    RunsAtShack, "The shack's park list."),
     ("lookup_park_live",               RunsAtShack, "A park lookup from the shack."),
     ("lotw_sat_names",                 RunsAtShack, "The satellite names the shack's logbook accepts."),
@@ -493,6 +495,7 @@ pub const CLASSES: &[(&str, Class, &str)] = &[
     ("set_log_form_grid",              RunsAtShack, "The shack's log form."),
     ("set_logbook_columns",            RunsAtShack, "Saves the Logbook's column choice in the shack's settings; display only."),
     ("set_logbook_filters",            RunsAtShack, "Saves the Logbook's named filters in the shack's settings; display only."),
+    ("set_longwave_token",             RefusedHere, "Credentials are set at the shack only."),
     ("set_lotw_password",              RefusedHere, "Credentials are set at the shack only."),
     ("set_mic_gain",                   RunsAtShack, "The shack's rig control."),
     ("set_mode",                       StartsTx,    "A run mode calls CQ and arms transmit."),
@@ -638,4 +641,23 @@ pub fn classes() -> impl Iterator<Item = (&'static str, Class)> {
     #[cfg(feature = "bench-road-switch")]
     let rows = rows.chain([(crate::bench_road_switch::COMMAND, RunsHere)]);
     rows
+}
+
+#[cfg(test)]
+mod longwave_tests {
+    use super::*;
+
+    #[test]
+    fn longwave_credentials_and_destination_tests_are_station_local() {
+        assert!(CLASSES.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        for command in [
+            "set_longwave_token",
+            "clear_longwave_token",
+            "longwave_logbooks",
+        ] {
+            assert_eq!(class_of(command), Some(Class::RefusedHere));
+        }
+        assert_eq!(class_of("log_qso"), Some(Class::RunsAtShack));
+        assert_eq!(class_of("not_a_command"), None);
+    }
 }

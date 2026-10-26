@@ -6,6 +6,38 @@ use crate::command_classes::registered;
 use serde_json::json;
 use tempo_client::classes::CLASSES;
 
+#[test]
+fn longwave_destination_and_forwarding_cannot_be_retargeted_from_afar() {
+    let shack = tempo_app::settings::Settings {
+        longwave_url: "https://home.example.invalid".into(),
+        longwave_logbook_id: "home-book".into(),
+        longwave_upload: false,
+        ..Default::default()
+    };
+    let edited = tempo_app::settings::Settings {
+        longwave_url: "https://other.example.invalid".into(),
+        longwave_logbook_id: "other-book".into(),
+        longwave_upload: true,
+        ..shack.clone()
+    };
+    let mut remote = edited.clone();
+    keep_the_shacks_settings(
+        &shack,
+        &mut remote,
+        Some(&Afar {
+            stand_down: 1,
+            starts_voided: 0,
+        }),
+    );
+    assert_eq!(remote.longwave_url, shack.longwave_url);
+    assert_eq!(remote.longwave_logbook_id, shack.longwave_logbook_id);
+    assert!(!remote.longwave_upload);
+    let mut local = edited;
+    keep_the_shacks_settings(&shack, &mut local, None);
+    assert_eq!(local.longwave_url, "https://other.example.invalid");
+    assert!(local.longwave_upload);
+}
+
 // --- Scaffolding ---------------------------------------------------------------------------------
 
 /// Stores whose revisions and `ui-state.json` a test sets, and a file that can stop reading: at
@@ -769,6 +801,9 @@ const TRANSMITS_BY_ITSELF: &[Change] = &[
         s.js8_api_udp_accept = !s.js8_api_udp_accept
     }),
     ("remote_stream", |s| s.remote_stream = !s.remote_stream),
+    ("phone_desktop_mic", |s| {
+        s.phone_desktop_mic = !s.phone_desktop_mic
+    }),
 ];
 
 /// ⛔ The guards on a transmission: what stops or caps one by itself, the licence privileges, and

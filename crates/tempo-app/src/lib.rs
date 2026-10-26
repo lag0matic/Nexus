@@ -296,6 +296,7 @@ impl AppState {
                 ptt_refusal: None,
                 tx_hold: None,
                 voice_playing: false,
+                phone_desktop_mic: false,
                 slot: 0,
                 next_slot_ms: 0,
                 // Optimistic until the engine has seen decodes to judge from

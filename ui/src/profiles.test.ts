@@ -30,6 +30,13 @@ const settings = (over: Partial<Settings>): Settings =>
   ({ mycall: 'KD9TAW', serialPort: 'COM1', phoneMode: 'ssb', ...over }) as Settings
 
 describe('config profiles', () => {
+  it('never changes the local live microphone source through a profile', () => {
+    const current = settings({ phoneDesktopMic: false, phoneMode: 'ssb' })
+    const foreign = settings({ phoneDesktopMic: true, phoneMode: 'fm' })
+    const merged = mergeProfile(current, foreign)
+    expect(merged.phoneDesktopMic).toBe(false)
+    expect(merged.phoneMode).toBe('fm')
+  })
   beforeEach(() => memStore.clear())
 
   it('starts empty and tolerates corrupt storage', () => {
@@ -233,6 +240,7 @@ describe('mergeProfile — the logbook upload switches never import', () => {
     'hrdlogUpload',
     'wrlUpload',
     'cloudlogUpload',
+    'longwaveUpload',
     'lotwAutoUpload',
   ])('%s keeps its current value, on or off', (key) => {
     for (const now of [true, false]) {

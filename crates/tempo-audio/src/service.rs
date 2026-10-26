@@ -11870,20 +11870,29 @@ impl RadioLoop {
             // the CONTACT (the received audio), which IS the shared tap. The mic
             // open/close takes the cpal host lock, so it runs OUTSIDE the engine lock, and
             // it never touches the main capture stream, so the decode path never restarts.
-            let recording_active = {
+            let (recording_active, desktop_device) = {
                 let eng = engine_lock(engine);
-                eng.is_recording()
+                (
+                    eng.is_recording(),
+                    eng.desktop_mic_device().map(str::to_owned),
+                )
             };
-            let want_mic =
-                crate::backend::want_voice_mic(recording_active, &self.applied.voice_mic_device);
+            let want_mic = desktop_device.is_some()
+                || crate::backend::want_voice_mic(recording_active, &self.applied.voice_mic_device);
+            let mic_device = desktop_device
+                .as_deref()
+                .unwrap_or(&self.applied.voice_mic_device);
             if want_mic && !self.voice_mic_open && !self.voice_mic_failed {
                 // Rising edge: open the mic once. A failed open surfaces why and falls back
                 // to the shared tap; `voice_mic_failed` blocks a per-loop retry until the
                 // recording ends (so we don't spam the device open every 20 ms).
-                match backend.set_voice_mic(Some(&self.applied.voice_mic_device)) {
+                match backend.set_voice_mic(Some(mic_device)) {
                     Ok(()) => self.voice_mic_open = true,
                     Err(e) => {
                         self.voice_mic_failed = true;
+                        if desktop_device.is_some() {
+                            engine_lock(engine).set_ptt(false);
+                        }
                         // Notice only over None or our own line — a real device
                         // error or a live monitor notice is not ours to stomp
                         // (review: the mic failure erased both kinds).
@@ -11892,10 +11901,12 @@ impl RadioLoop {
                                 let mut eng = engine_lock(engine);
                                 eng.set_audio_error(Some((
                                     AudioErrorKind::VoiceMic,
-                                    format!(
+                                    if desktop_device.is_some() {
+                                        format!("Desktop microphone could not open: {e}; transmission stopped")
+                                    } else { format!(
                                         "Voice mic could not open: {e} — recording from the \
                                          shared input instead"
-                                    ),
+                                    ) },
                                 )));
                             }
                             self.err_owner = ErrOwner::VoiceMic;
@@ -11930,6 +11941,10 @@ impl RadioLoop {
             } else {
                 Vec::new()
             };
+            // Receiver audio is never a fallback for a live transmission.
+            if desktop_device.is_some() {
+                engine_lock(engine).push_desktop_mic(&mic_samples, self.mono_now(now));
+            }
             let rec_samples: &[f32] = if self.voice_mic_open {
                 &mic_samples
             } else {
@@ -32778,6 +32793,86 @@ mod tests {
             assert!(s.rig.keyed, "premise: the page's audio keyed the rig");
             s
         }
+    }
+
+    fn desktop_mic_scene() -> MicScene {
+        let mut s = MicScene::new();
+        {
+            let mut e = s.engine.lock().unwrap();
+            let mut settings = e.settings().clone();
+            settings.phone_desktop_mic = true;
+            settings.voice_mic_device = "Desktop mic".into();
+            e.apply_settings(settings);
+        }
+        s.step(0.0);
+        s.engine.lock().unwrap().set_ptt(true);
+        assert!(s.engine.lock().unwrap().mic_armed());
+        s
+    }
+
+    #[test]
+    fn desktop_mic_routes_only_the_named_capture_and_release_flushes() {
+        let mut s = desktop_mic_scene();
+        s.step(20.0);
+        assert!(!s.rig.keyed, "arming alone must not key");
+        for n in 2..25 {
+            s.backend.queue_capture(vec![0.9; 240]);
+            s.backend.queue_voice_capture(vec![0.25; 240]);
+            s.step(n as f64 * 20.0);
+        }
+        assert!(s.rig.keyed, "actual mic capture must key");
+        assert!(s.backend.played.contains(&0.25), "voice reached the output");
+        assert!(
+            !s.backend.played.contains(&0.9),
+            "receiver audio never transmits"
+        );
+        assert_eq!(s.backend.voice_mic_calls, vec![Some("Desktop mic".into())]);
+        s.engine.lock().unwrap().set_ptt(false);
+        s.step(500.0);
+        assert!(!s.rig.keyed);
+        assert!(s.backend.flush_calls > 0);
+        assert_eq!(s.backend.voice_mic_calls.last(), Some(&None));
+    }
+
+    #[test]
+    fn desktop_mic_open_failure_never_transmits_the_receiver() {
+        let mut s = desktop_mic_scene();
+        s.backend.voice_mic_fail = true;
+        s.backend.queue_capture(vec![0.9; 240]);
+        s.step(20.0);
+        assert!(!s.rig.keyed);
+        assert!(!s.engine.lock().unwrap().mic_armed());
+        assert!(s.backend.played.is_empty());
+        assert!(s
+            .engine
+            .lock()
+            .unwrap()
+            .snapshot()
+            .radio
+            .audio_error
+            .unwrap()
+            .contains("transmission stopped"));
+        s.backend.voice_mic_fail = false;
+        s.backend.queue_voice_capture(vec![0.25; 240]);
+        s.step(40.0);
+        assert!(!s.rig.keyed, "device recovery cannot rearm PTT");
+    }
+
+    #[test]
+    fn desktop_mic_capture_loss_unkeys_and_never_replays() {
+        let mut s = desktop_mic_scene();
+        for n in 1..25 {
+            s.backend.queue_voice_capture(vec![0.25; 240]);
+            s.step(n as f64 * 20.0);
+        }
+        assert!(s.rig.keyed);
+        s.step(740.0);
+        assert!(!s.rig.keyed);
+        let played = s.backend.played.len();
+        s.backend.queue_voice_capture(vec![0.25; 240]);
+        s.step(760.0);
+        assert!(!s.rig.keyed);
+        assert_eq!(s.backend.played.len(), played);
     }
 
     /// ★ M1 at the transmitter (the design's `arming_without_audio_never_asserts_ptt`): a held PTT

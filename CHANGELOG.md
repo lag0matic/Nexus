@@ -5,6 +5,14 @@ All notable changes to Nexus (formerly Tempo) are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0-longwave.1] - 2026-10-26
+
+### Added
+- Carry Longwave logging and local desktop microphone support onto Nexus 1.21.0 for a private Linux AppImage.
+
+### Fixed
+- Honor the upstream sign-in transmit hold when arming the local desktop microphone.
+
 ## [1.21.0] — 2026-10-26
 
 ### Added
@@ -572,6 +580,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   computer you paired could not connect, or reconnect after a Wi-Fi drop. Connections still being set up no longer
   take those places, and when too many are waiting the oldest is dropped. An open session and Stop were never
   affected.
+## [1.20.0-longwave.1] - 2026-10-24
+
+### Added
+- Preserve the private Longwave logging connector and locally approved server certificates.
+- Preserve local desktop microphone routing for Phone PTT and its transmit safeguards.
 
 ## [1.20.0] — 2026-10-22
 

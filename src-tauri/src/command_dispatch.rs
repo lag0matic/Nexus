@@ -228,6 +228,7 @@ pub(crate) fn keep_the_shacks_transmit_settings(
     save.tci_server_spots = shack.tci_server_spots;
     // What lets a browser drive the station's own window, its transmit keys included.
     save.remote_stream = shack.remote_stream;
+    save.phone_desktop_mic = shack.phone_desktop_mic;
     // What stops or caps a transmission by itself.
     save.tx_watchdog_min = shack.tx_watchdog_min;
     save.js8_idle_watchdog_min = shack.js8_idle_watchdog_min;
@@ -324,6 +325,9 @@ pub(crate) fn keep_the_shacks_credential_addresses(
         return;
     }
     save.cloudlog_url = shack.cloudlog_url.clone();
+    save.longwave_url = shack.longwave_url.clone();
+    save.longwave_logbook_id = shack.longwave_logbook_id.clone();
+    save.longwave_upload = shack.longwave_upload;
     save.fd_join_addr = shack.fd_join_addr.clone();
     let edited = (!save.radios.is_empty())
         .then(|| shack.radios.iter().find(|p| p.id == save.active_radio))
@@ -447,7 +451,7 @@ pub(crate) fn keep_the_shacks_settings(
 /// addresses the shack sends a stored key or password to
 /// ([`keep_the_shacks_credential_addresses`]). A test changes each setting alone in a save from
 /// afar and holds this list to exactly the ones that come back.
-pub(crate) const STATION_ONLY_SETTINGS: [&str; 53] = [
+pub(crate) const STATION_ONLY_SETTINGS: [&str; 57] = [
     "js8AprsRelay",
     "beaconTxPercent",
     "cqPauseSecs",
@@ -465,6 +469,7 @@ pub(crate) const STATION_ONLY_SETTINGS: [&str; 53] = [
     "tciServerCw",
     "tciServerSpots",
     "remoteStream",
+    "phoneDesktopMic",
     "txWatchdogMin",
     "js8IdleWatchdogMin",
     "tuneTimeoutSecs",
@@ -498,6 +503,9 @@ pub(crate) const STATION_ONLY_SETTINGS: [&str; 53] = [
     "flexNativeUnbenched",
     "tqslPath",
     "cloudlogUrl",
+    "longwaveUrl",
+    "longwaveLogbookId",
+    "longwaveUpload",
     "fdJoinAddr",
     "icomLanHost",
     "icomLanPort",

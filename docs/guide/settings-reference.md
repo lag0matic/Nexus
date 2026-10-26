@@ -985,6 +985,13 @@ signal lives here, not with the radio.
 
 **Microphone**
 
+- **Live voice source** selects **Radio microphone** (the default) or
+  **Desktop microphone** for local Phone PTT. The desktop option sends the
+  selected microphone to the configured radio audio output. The radio must
+  accept USB/data audio for voice; this does not change that radio menu.
+- **Desktop microphone input** appears with the desktop source selected. Choose
+  a named microphone, not the radio receive codec. A missing input refuses live
+  transmission, and lost capture stops it without substituting receiver audio.
 - **Voice mic (recording)** — "Mic used when RECORDING a voice-keyer message.
   Default records from the audio input device — but on a digital setup that's the
   rig's RX audio, so you'd record the band, not your voice. Pick your actual mic

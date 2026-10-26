@@ -1981,9 +1981,11 @@ dependencies = [
  "native-tls",
  "quick-xml",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "sgp4",
+ "tempo-base",
  "tempo-core",
 ]
 

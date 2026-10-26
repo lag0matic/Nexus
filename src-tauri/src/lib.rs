@@ -95,6 +95,8 @@ mod log_history;
 mod log_queries;
 /// The Logbook's clean-up tools: duplicates and their merge, bulk edit, and the check's fixes.
 mod log_tools;
+/// Locally approved Longwave HTTPS certificates, scoped to an exact server origin.
+mod longwave_trust;
 /// Parsec presence mode's watcher thread: stop latched transmissions when the operator's Parsec
 /// session drops (off by default; started on Windows only).
 mod parsec_presence;
@@ -25909,6 +25911,7 @@ const CLUBLOG_KEYCHAIN_USER: &str = "clublog-password";
 const HRDLOG_KEYCHAIN_USER: &str = "hrdlog-code";
 const WRL_KEYCHAIN_USER: &str = "wrl-key";
 const CLOUDLOG_KEYCHAIN_USER: &str = "cloudlog-key";
+const LONGWAVE_KEYCHAIN_USER: &str = "longwave-token";
 const WINLINK_KEYCHAIN_USER: &str = "winlink-password";
 
 /// Client name and version Nexus sends to HRDLog.net's `NewEntry.aspx` as `App` (aids their
@@ -25932,7 +25935,7 @@ fn cap_hrdlog_retries(failed: u8, retries_so_far: u8) -> u8 {
 
 /// Each connector leg's name in the Connections log — one table, so the queue-full line, the
 /// catch-up progress line and the panel cannot come to call the same service by two names.
-const UPLOAD_LEG_SERVICES: [(u8, &str); 7] = {
+const UPLOAD_LEG_SERVICES: [(u8, &str); 8] = {
     use tempo_app::engine::upload_legs as legs;
     [
         (legs::QRZ, "QRZ Logbook"),
@@ -25941,6 +25944,7 @@ const UPLOAD_LEG_SERVICES: [(u8, &str); 7] = {
         (legs::HRDLOG, "HRDLog.net"),
         (legs::N3FJP, "N3FJP"),
         (legs::CLOUDLOG, "Cloudlog"),
+        (legs::LONGWAVE, "Longwave"),
         (legs::WRL, "World Radio League"),
     ]
 };
@@ -26373,6 +26377,7 @@ static CONN_HEALTH_LOADED: std::sync::atomic::AtomicBool =
 /// only as the panel going amber again after a restart, which is #245's exact symptom.
 /// `winlink` was missing for that reason, ahead of its own health stamps.
 const CONN_HEALTH_IDS: &[&str] = &[
+    "longwave",
     "cloudlog",
     "clublog",
     "eqsl",
@@ -26512,6 +26517,9 @@ fn flatten_detail(detail: &str) -> String {
 /// the same deciders over the same domains and fails when one is missed.
 fn persistable_details() -> Vec<ConnDetail> {
     let mut v = Vec::new();
+    for class in LONGWAVE_FAILURES {
+        v.push(longwave_stamp(class));
+    }
     // HRDLog and WRL: each service's own closed result set, plus a code it has never sent.
     for r in ["ok", "duplicate", "authFail", "unknown", "?"] {
         v.push(hrdlog_stamp(r).1);
@@ -27124,6 +27132,12 @@ fn credentials_status(
     let (hrdlog_ok, hrdlog_fail, hrdlog_detail) = conn_health_of("hrdlog");
     let (wrl_ok, wrl_fail, wrl_detail) = conn_health_of("wrl");
     let (cloudlog_ok, cloudlog_fail, cloudlog_detail) = conn_health_of("cloudlog");
+    let (longwave_url, longwave_on) = {
+        let eng = engine_lock(engine);
+        let s = eng.settings();
+        (s.longwave_url.clone(), s.longwave_upload)
+    };
+    let (longwave_ok, longwave_fail, longwave_detail) = conn_health_of("longwave");
     // #245, defect 1: the QRZ callbook row's stamps were hard-coded `None`, so it was amber
     // forever. `qrz_lookup` now records every completed lookup — see `qrz_xml_stamp`.
     let qrz_xml = conn_health_of("qrz-xml");
@@ -27267,6 +27281,18 @@ fn credentials_status(
             paused: false,
         },
         CredStatus {
+            id: "longwave".into(),
+            connector: "Longwave".into(),
+            stored: has(LONGWAVE_KEYCHAIN_USER),
+            identity: longwave_url,
+            uploads: true,
+            enabled: longwave_on,
+            last_success_unix: longwave_ok,
+            last_failure_unix: longwave_fail,
+            last_failure_detail: longwave_detail,
+            paused: false,
+        },
+        CredStatus {
             // The token is app-scoped (an rbuapp_… token the user generates on
             // RepeaterBook); there's no separate username identity to show.
             id: "repeaterbook".into(),
@@ -27359,6 +27385,215 @@ fn clublog_keychain() -> Result<keyring::Entry, String> {
 fn cloudlog_keychain() -> Result<keyring::Entry, String> {
     keyring::Entry::new(LOTW_KEYCHAIN_SERVICE, CLOUDLOG_KEYCHAIN_USER)
         .map_err(|e| format!("couldn't open the system keychain: {e}"))
+}
+
+fn longwave_keychain() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(LOTW_KEYCHAIN_SERVICE, LONGWAVE_KEYCHAIN_USER)
+        .map_err(|_| "Longwave system keychain is unavailable".to_string())
+}
+
+/// Write-only; there is deliberately no token field in Settings or any read command.
+#[tauri::command(async)]
+fn set_longwave_token(token: String) -> Result<(), String> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err("Enter a Longwave client token".into());
+    }
+    longwave_keychain()?
+        .set_password(token)
+        .map_err(|_| "Could not save the Longwave token to the system keychain".to_string())?;
+    conn_log("Longwave", "ok", "Client token saved to the OS keychain");
+    Ok(())
+}
+
+#[tauri::command(async)]
+fn clear_longwave_token() -> Result<(), String> {
+    clear_keychain_entry(&longwave_keychain()?)
+        .map_err(|_| "Could not remove the Longwave token from the system keychain".to_string())?;
+    conn_log(
+        "Longwave",
+        "info",
+        "Client token removed from the OS keychain",
+    );
+    Ok(())
+}
+
+/// Explicit read-only test. Uses the edited URL, without saving unrelated form fields.
+#[tauri::command(async)]
+async fn longwave_logbooks(url: String) -> Result<Vec<propagation::longwave::Logbook>, String> {
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let token = longwave_keychain().and_then(|entry| {
+            entry
+                .get_password()
+                .map_err(|_| "No Longwave client token stored".into())
+        })?;
+        let client = longwave_trust::client(&url, &token).map_err(|e| e.to_string())?;
+        client.operator().map_err(|e| e.to_string())?;
+        client.logbooks().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|_| "Longwave connection test could not complete".to_string())?;
+    // A successful read is not proof an upload works; only uploads stamp success.
+    conn_log(
+        "Longwave",
+        if result.is_ok() { "ok" } else { "error" },
+        if result.is_ok() {
+            "Connection verified; logbooks loaded"
+        } else {
+            "Connection test failed"
+        },
+    );
+    result
+}
+
+const LONGWAVE_FAILURES: [propagation::longwave::Failure; 8] = {
+    use propagation::longwave::Failure as F;
+    [
+        F::Configuration,
+        F::Credentials,
+        F::NotFound,
+        F::Refused,
+        F::Unreachable,
+        F::Certificate,
+        F::InvalidResponse,
+        F::UnconfirmedUpload,
+    ]
+};
+
+fn longwave_stamp(class: propagation::longwave::Failure) -> ConnDetail {
+    use propagation::longwave::Failure as F;
+    match class {
+        F::Configuration => {
+            conn_detail!("Check the Longwave URL, client token and selected logbook")
+        }
+        F::Credentials => conn_detail!("Longwave refused the client token"),
+        F::NotFound => conn_detail!("Longwave API or selected logbook was not found"),
+        F::Refused => conn_detail!("Longwave refused the contact"),
+        F::Unreachable => conn_detail!("Longwave could not be reached"),
+        F::Certificate => conn_detail!("Longwave HTTPS certificate is not trusted"),
+        F::InvalidResponse => conn_detail!("Longwave returned an unexpected response"),
+        F::UnconfirmedUpload => {
+            conn_detail!("Upload unconfirmed; check Longwave before sending again")
+        }
+    }
+}
+
+fn longwave_push_qso_impl(
+    dto: &LoggedQso,
+    engine: &SharedEngine,
+) -> Result<String, propagation::longwave::Failure> {
+    use propagation::longwave::Failure;
+    let (url, book, fallback_call) = {
+        let eng = engine_lock(engine);
+        let s = eng.settings();
+        (
+            s.longwave_url.clone(),
+            s.longwave_logbook_id.clone(),
+            s.mycall.clone(),
+        )
+    };
+    // Copy under the lock above; keychain and network I/O are outside it.
+    let token = longwave_keychain()
+        .map_err(|_| Failure::Configuration)?
+        .get_password()
+        .map_err(|_| Failure::Configuration)?;
+    let contact = longwave_contact(&book, &fallback_call, upload_record(dto.clone()))?;
+    longwave_trust::client(&url, &token)?.upload(&contact)
+}
+
+/// Map the logged record, not current radio readings or mutable form fields.
+fn longwave_contact(
+    book: &str,
+    fallback_call: &str,
+    rec: tempo_core::logbook::QsoRecord,
+) -> Result<propagation::longwave::Contact, propagation::longwave::Failure> {
+    use propagation::longwave::{Contact, Qso};
+    let operator = rec
+        .station_callsign
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .or(rec.operator.as_deref().filter(|s| !s.trim().is_empty()))
+        .unwrap_or(fallback_call);
+    let mut contact = Contact::from_qso(
+        book,
+        &Qso {
+            station_call: &rec.call,
+            operator_call: operator,
+            band: &rec.band,
+            mode: &rec.mode,
+            frequency_mhz: rec.freq_mhz,
+            when_unix: rec.when_unix,
+            time_known: rec.time_known,
+        },
+    )?;
+    contact.rst_sent = rec.rst_sent;
+    contact.rst_recvd = rec.rst_rcvd;
+    contact.tx_power = rec
+        .tx_power
+        .filter(|p| p.is_finite() && *p >= 0.0)
+        .map(|p| p.to_string());
+    contact.name = rec.name;
+    contact.qth = rec.qth;
+    contact.grid_square = rec.grid;
+    contact.country = rec.country;
+    contact.state = rec.state;
+    contact.dxcc = rec.dxcc.map(|d| d.to_string());
+    if rec.ota.their_program.as_deref() == Some("POTA") {
+        contact.park_reference = rec.ota.their_ref;
+    }
+    contact.county = rec
+        .extra
+        .iter()
+        .find(|(k, _)| k == "CNTY")
+        .map(|(_, v)| v.clone());
+    Ok(contact)
+}
+
+#[cfg(test)]
+mod longwave_connector_tests {
+    use super::*;
+
+    #[test]
+    fn logged_station_time_reports_and_pota_context_are_preserved() {
+        let rec = tempo_core::logbook::parse_adif(concat!(
+            "<CALL:4>W1AW<STATION_CALLSIGN:8>N0CALL/P<OPERATOR:6>N0CALL",
+            "<BAND:3>20m<MODE:2>CW<FREQ:7>14.0475<QSO_DATE:8>20240101<TIME_ON:6>235959",
+            "<RST_SENT:3>599<RST_RCVD:3>579<TX_PWR:2>50<NAME:3>Joe<GRIDSQUARE:4>FN31",
+            "<SIG:4>POTA<SIG_INFO:7>US-1234<EOR>"
+        ))
+        .pop()
+        .expect("one logged contact");
+        let contact = longwave_contact("book-a", "OTHER", rec).unwrap();
+        let json = serde_json::to_value(contact).unwrap();
+        assert_eq!(json["station_callsign"], "W1AW");
+        assert_eq!(json["operator_callsign"], "N0CALL/P");
+        assert_eq!(json["qso_date"], "20240101");
+        assert_eq!(json["time_on"], "235959");
+        assert_eq!(json["frequency_khz"], 14047.5);
+        assert_eq!(json["rst_recvd"], "579");
+        assert_eq!(json["grid_square"], "FN31");
+        assert_eq!(json["park_reference"], "US-1234");
+    }
+
+    #[test]
+    fn unknown_time_is_not_fabricated_and_health_details_survive_reload() {
+        let rec = tempo_core::logbook::parse_adif(
+            "<CALL:4>W1AW<BAND:3>20m<MODE:2>CW<FREQ:6>14.047<QSO_DATE:8>20240101<EOR>",
+        )
+        .pop()
+        .unwrap();
+        assert!(longwave_contact("book-a", "N0CALL", rec).is_err());
+        assert!(CONN_HEALTH_IDS.contains(&"longwave"));
+        let allowed = persistable_details();
+        for class in LONGWAVE_FAILURES {
+            assert!(allowed
+                .iter()
+                .any(|s| s.as_str() == longwave_stamp(class).as_str()));
+        }
+        let mask = tempo_app::engine::upload_legs::mask_for(&["longwave".into()]);
+        assert_eq!(mask, tempo_app::engine::upload_legs::LONGWAVE);
+        assert_ne!(mask, 0);
+    }
 }
 
 fn hrdlog_keychain() -> Result<keyring::Entry, String> {
@@ -32002,6 +32237,7 @@ struct ConnectorToggles {
     wrl_on: bool,
     n3fjp_on: bool,
     cloudlog_on: bool,
+    longwave_on: bool,
 }
 
 /// Push one logged QSO to each enabled+owed connector. Returns the bitmask of
@@ -32017,6 +32253,7 @@ fn auto_push_one(engine: &SharedEngine, dto: LoggedQso, on: ConnectorToggles, ow
         wrl_on,
         n3fjp_on,
         cloudlog_on,
+        longwave_on,
     } = on;
     use tempo_app::engine::upload_legs as legs;
     let call = dto.call.clone();
@@ -32341,6 +32578,23 @@ fn auto_push_one(engine: &SharedEngine, dto: LoggedQso, on: ConnectorToggles, ow
         if transient {
             failed |= legs::CLOUDLOG;
         }
+    }
+    if longwave_on && owed & legs::LONGWAVE != 0 {
+        let result = longwave_push_qso_impl(&dto, engine);
+        let (ok, detail, part) = match result {
+            Ok(_) => (true, conn_detail!(""), "Longwave: saved".to_string()),
+            Err(class) => (false, longwave_stamp(class), format!("Longwave: {class}")),
+        };
+        conn_log(
+            "Longwave",
+            if ok { "ok" } else { "error" },
+            format!("{call}: {part}"),
+        );
+        note_conn_health("longwave", ok, detail);
+        parts.push(part);
+        all_ok &= ok;
+        // Never add LONGWAVE to `failed`: POST is not idempotent. An uncertain
+        // result stays visible for review, never becomes a background duplicate.
     }
     if !parts.is_empty() {
         note_upload_shared(engine, format!("{call} → {}", parts.join(" · ")), all_ok);
@@ -38686,6 +38940,7 @@ fn start_on_the_logbook(
                 wrl_on,
                 n3fjp_on,
                 cloudlog_on,
+                longwave_on,
                 dxk,
                 cl_email,
                 cl_key,
@@ -38693,7 +38948,7 @@ fn start_on_the_logbook(
                 // Recover a poisoned lock (conn_log pattern) — a panicked command
                 // holding the engine must not silently kill auto-upload forever.
                 let mut eng = engine_lock_result(&push_engine).unwrap_or_else(|e| e.into_inner());
-                let (q, c, e, h, w, hrd, n, cl, dxk, cl_email, cl_key) = {
+                let (q, c, e, h, w, hrd, n, cl, lw, dxk, cl_email, cl_key) = {
                     let s = eng.settings();
                     (
                         s.qrz_logbook_upload,
@@ -38706,6 +38961,7 @@ fn start_on_the_logbook(
                         s.hrd_logging,
                         s.n3fjp_upload && !s.n3fjp_host.trim().is_empty(),
                         s.cloudlog_upload && !s.cloudlog_url.trim().is_empty(),
+                        s.longwave_upload,
                         // DXKeeper: empty host = off. Carried as (host, base_port, uploads)
                         // rather than a bool because the push needs all three and re-locking
                         // the engine per record just to re-read them would be wasteful.
@@ -38737,7 +38993,7 @@ fn start_on_the_logbook(
                 // #290: what the full queue dropped, taken EVERY tick — before the return
                 // below, so it cannot pile up while nothing is on.
                 let dropped = eng.take_dropped_uploads();
-                if !(q || c || e || h || w || hrd || n || cl || dxk.is_some()) {
+                if !(q || c || e || h || w || hrd || n || cl || lw || dxk.is_some()) {
                     // Nothing enabled: LEAVE the queue intact (bounded at 256) so
                     // flipping a toggle on later still uploads this session's
                     // recent QSOs — log-first-configure-later must not lose them.
@@ -38753,6 +39009,7 @@ fn start_on_the_logbook(
                     w,
                     n,
                     cl,
+                    lw,
                     dxk,
                     cl_email,
                     cl_key,
@@ -38767,6 +39024,7 @@ fn start_on_the_logbook(
                     (hrdlog_on, legs::HRDLOG),
                     (n3fjp_on, legs::N3FJP),
                     (cloudlog_on, legs::CLOUDLOG),
+                    (longwave_on, legs::LONGWAVE),
                     (wrl_on, legs::WRL),
                 ]
                 .into_iter()
@@ -38914,6 +39172,7 @@ fn start_on_the_logbook(
                         wrl_on,
                         n3fjp_on,
                         cloudlog_on,
+                        longwave_on,
                     },
                     p.legs,
                 );
@@ -40143,6 +40402,7 @@ pub(crate) fn app_commands() -> Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + 
         dxcc_entities,
         dxcc_entity_continents,
         cloudlog_station_info,
+        longwave_logbooks,
         dxcc_entity_locations,
         set_frequency,
         sstv_tune,
@@ -40400,6 +40660,8 @@ pub(crate) fn app_commands() -> Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + 
         clear_qrz_logbook_key,
         set_cloudlog_key,
         clear_cloudlog_key,
+        set_longwave_token,
+        clear_longwave_token,
         qrz_push_qso,
         qrz_correct_preview,
         qrz_correct_apply,
