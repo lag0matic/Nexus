@@ -3085,6 +3085,9 @@ export async function setCompLevel(level: number): Promise<AppSnapshot> {
 export async function setNotchFreq(hz: number): Promise<AppSnapshot> {
   return invoke<AppSnapshot>('set_notch_freq', { hz })
 }
+export async function setNotchPosition(position: number): Promise<AppSnapshot> {
+  return invoke<AppSnapshot>('set_notch_position', { position })
+}
 
 /** Set AF gain (the rig's volume) as a 0.0–1.0 fraction.
  *

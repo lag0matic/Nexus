@@ -511,6 +511,9 @@ pub(crate) mod tests_support {
         /// would store 12 whether the wire said `0x12` or `0x0c`. Keeping the byte makes
         /// the encoding itself assertable.
         pub att_raw: u8,
+        pub tuner_state: u8,
+        pub reject_tuner_start: bool,
+        pub drop_tuner_start: bool,
         /// THE `0x16` REGISTER FILE, sub-command → its byte. One map rather than a field
         /// per control, because that is what the family is on a real Icom: NB (`22`), NR
         /// (`40`), ANF (`41`), COMP (`44`), MON (`45`), VOX (`46`), MN (`48`), the PREAMP
@@ -933,6 +936,16 @@ pub(crate) mod tests_support {
             }
             // THE `0x14` LEVEL FAMILY — see [`Regs::levels`]. A bare
             // sub-command reads; a sub-command plus two BCD bytes writes.
+            (0x1C, Some(0x01)) => match data {
+                [0x01] => Some((0x1C, vec![0x01, r.tuner_state])),
+                [0x01, 0x02] if r.drop_tuner_start => Some((SILENT, Vec::new())),
+                [0x01, 0x02] if r.reject_tuner_start => Some((0xFA, Vec::new())),
+                [0x01, state @ 0..=2] => {
+                    r.tuner_state = *state;
+                    None
+                }
+                _ => Some((0xFA, Vec::new())),
+            },
             (0x14, Some(sub)) => {
                 let file = if on_sub {
                     &mut r.sub_levels
@@ -1138,6 +1151,9 @@ pub(crate) mod tests_support {
                         drop_satmode_reads: 0,
                         scope_fixed: false,
                         att_raw: 0,
+                        tuner_state: 0,
+                        reject_tuner_start: false,
+                        drop_tuner_start: false,
                         funcs: std::collections::BTreeMap::new(),
                         levels: std::collections::BTreeMap::new(),
                         sub_levels: std::collections::BTreeMap::new(),

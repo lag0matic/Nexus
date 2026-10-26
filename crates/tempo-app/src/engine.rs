@@ -4221,6 +4221,8 @@ pub struct Engine {
     /// HZ, not a 0..1 fraction.
     notch_freq_hz: Option<f32>,
     rig_notch_freq_hz: Option<f32>,
+    notch_position_raw: Option<u8>,
+    rig_notch_position_raw: Option<u8>,
     /// THE THREE ANALOG LEVELS a voice operator rides continuously, and which a digital-first
     /// history left out: AF gain, RF gain and squelch. Same desired/read-back split as every
     /// pair above — the rig's own value wins when it reports one, so a slider shows where the
@@ -6699,6 +6701,8 @@ impl Engine {
             rig_comp_level: None,
             notch_freq_hz: None,
             rig_notch_freq_hz: None,
+            notch_position_raw: None,
+            rig_notch_position_raw: None,
             agc: None,
             rig_agc: None,
             agc_picked: false,
@@ -12346,10 +12350,31 @@ impl Engine {
     /// notch commanded outside it is one the operator cannot hear and cannot find again.
     pub fn set_notch_freq_hz(&mut self, hz: f32) {
         self.remote_actuation.revoke();
+        self.notch_position_raw = None;
         self.notch_freq_hz = Some(hz.clamp(NOTCH_MIN_HZ, NOTCH_MAX_HZ));
     }
     pub fn notch_freq_hz(&self) -> Option<f32> {
         self.notch_freq_hz
+    }
+    pub fn set_notch_position_raw(&mut self, position: u8) -> Result<(), String> {
+        if self.settings.rig_model != 3073 || self.rig_notch_position_raw.is_none() {
+            return Err("This CAT connection has not reported a raw notch position".into());
+        }
+        self.remote_actuation.revoke();
+        self.notch_freq_hz = None;
+        self.notch_position_raw = Some(position);
+        Ok(())
+    }
+    pub fn take_notch_position_raw(&mut self) -> Option<u8> {
+        let position = self.notch_position_raw.take();
+        (self.settings.rig_model == 3073)
+            .then_some(position)
+            .flatten()
+    }
+    pub fn observe_rig_notch_position_raw(&mut self, position: u8) {
+        self.rig_notch_freq_hz = None;
+        self.notch_freq_hz = None;
+        self.rig_notch_position_raw = Some(position);
     }
     pub fn observe_rig_notch_freq_hz(&mut self, hz: f32) {
         if hz.is_finite() {
@@ -12809,6 +12834,8 @@ impl Engine {
     /// CAT link never freezes stale NB/NR/… states in the cockpit.
     pub fn clear_rig_funcs(&mut self) {
         self.rig_funcs = [None; 7];
+        self.notch_position_raw = None;
+        self.rig_notch_position_raw = None;
     }
 
     /// Queue a func toggle from the UI (`func` = "nb"|"nr"|"notch"|"comp"|"vox"); the radio loop
@@ -27739,6 +27766,9 @@ contact yourself."
         s.radio.nr_level = self.rig_nr_level.or(self.nr_level);
         s.radio.comp_level = self.rig_comp_level.or(self.comp_level);
         s.radio.notch_freq_hz = self.rig_notch_freq_hz.or(self.notch_freq_hz);
+        s.radio.notch_position_raw = (self.settings.rig_model == 3073)
+            .then_some(self.rig_notch_position_raw)
+            .flatten();
         s.radio.af_gain = self.rig_af_gain.or(self.af_gain);
         s.radio.rf_gain = self.rig_rf_gain.or(self.rf_gain);
         s.radio.squelch = self.rig_squelch.or(self.squelch);
@@ -33070,6 +33100,27 @@ fn haversine_km(a: (f64, f64), b: (f64, f64)) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ic7300_raw_notch_commands_require_a_readback_and_are_one_shot() {
+        let mut e = super::Engine::new("W9TST", "EN52", 0);
+        e.settings.rig_model = 3073;
+        assert!(e.set_notch_position_raw(127).is_err());
+        e.observe_rig_notch_position_raw(0);
+        assert_eq!(e.snapshot().radio.notch_position_raw, Some(0));
+        assert_eq!(e.snapshot().radio.notch_freq_hz, None);
+        e.set_notch_position_raw(255).unwrap();
+        assert_eq!(e.take_notch_position_raw(), Some(255));
+        assert_eq!(e.take_notch_position_raw(), None);
+        e.set_notch_position_raw(127).unwrap();
+        e.clear_rig_funcs();
+        assert_eq!(e.take_notch_position_raw(), None);
+        assert_eq!(e.snapshot().radio.notch_position_raw, None);
+        e.settings.rig_model = 1049;
+        e.observe_rig_notch_freq_hz(1_200.0);
+        assert!(e.set_notch_position_raw(127).is_err());
+        assert_eq!(e.snapshot().radio.notch_freq_hz, Some(1_200.0));
+        assert_eq!(e.snapshot().radio.notch_position_raw, None);
+    }
 
     /// The key hash a test JOIN under `pos` carries: what the bridge makes of that position's
     /// key ([`crate::fdevent::sha256_hex`]), for a key generated (a per-run seed through the

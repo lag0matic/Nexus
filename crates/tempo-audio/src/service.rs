@@ -9136,11 +9136,8 @@ impl RadioLoop {
                         // is offered no ATU button — an ATU control on a radio with no ATU is
                         // worse than no control.
                         //
-                        // KNOWN GAP: the NATIVE CI-V daemon has no `TUNER` token (`civ::commands
-                        // ::func_sub` covers the `0x16` DSP family; Icom's ATU is `1C 01`), so a
-                        // native-Icom operator gets `None` here and no button. That is the honest
-                        // answer rather than a wrong one, and adding it means a second CAT surface
-                        // this machine has no rig to verify — deliberately left for a bench pass.
+                        // The native IC-7300 daemon reads TUNER through 1C 01. Its tune-start
+                        // operation and Hamlib's use G TUNE, independently of this on/off read.
                         //
                         // ⭐ AND WHETHER A TUNE-UP CAN BE STARTED AT ALL (operator ruling,
                         // 2026-09-19: "Say it can't, add it natively"). Hamlib's Icom and
@@ -9274,13 +9271,24 @@ impl RadioLoop {
                             // `read_meter_f32` is the RAW reader (it is what read_agc uses);
                             // `read_level` would reject this outright, since it filters to
                             // 0.0..=1.0 and a notch frequency is hundreds of Hz.
-                            let ok = match rig.read_meter_f32("NOTCHF") {
-                                Some(hz) => {
-                                    let mut eng = engine_lock(engine);
-                                    eng.observe_rig_notch_freq_hz(hz);
-                                    true
+                            let ok = if self.applied.rig_model == 3073 {
+                                match rig.read_meter_f32("NOTCHF_RAW") {
+                                    Some(raw) if raw <= 255.0 && raw.fract() == 0.0 => {
+                                        engine_lock(engine)
+                                            .observe_rig_notch_position_raw(raw as u8);
+                                        true
+                                    }
+                                    _ => false,
                                 }
-                                None => false,
+                            } else {
+                                match rig.read_meter_f32("NOTCHF") {
+                                    Some(hz) => {
+                                        let mut eng = engine_lock(engine);
+                                        eng.observe_rig_notch_freq_hz(hz);
+                                        true
+                                    }
+                                    None => false,
+                                }
                             };
                             note_ext_read(
                                 &mut self.level_supported[LVL_NOTCHF],
@@ -9837,7 +9845,9 @@ impl RadioLoop {
                         // brand STARTS a tune-up or only switches the tuner in-line — turned out
                         // to be the defect rather than a caveat. See `rig::ATU_START_TUNE` for
                         // the Hamlib source this was read out of, and for why 2 is a no-op
-                        // rather than a new behaviour on Icom and Kenwood. The FT-710 is the
+                        // rather than a new behaviour on Icom and Kenwood. The IC-7300 instead
+                        // uses G TUNE (1C 01 02); that path keeps its own acknowledgement.
+                        // The FT-710 is the
                         // exception: its 2 is unused and its start is 3, so the value comes
                         // from the model (`rigmodels::hamlib_atu_start_tune_value`).
                         let fire_atu = engine_lock(engine).take_atu_tune();
@@ -9854,12 +9864,7 @@ impl RadioLoop {
                             // asks for 2000 ms × 3 of them. One Hamlib read outlasts our whole
                             // window; our deadline then drops the stream. TX stayed armed and
                             // the next period boundary keyed an over into a running tune-up.
-                            match rig.set_func_value(
-                                "TUNER",
-                                crate::rigmodels::hamlib_atu_start_tune_value(
-                                    self.applied.rig_model,
-                                ),
-                            ) {
+                            match rig.start_atu_tune(self.applied.rig_model) {
                                 // ⭐ #322 / review R4: THE RADIO TOOK IT, so the Digital section
                                 // stands down (`Engine::note_atu_tune_started`). Here and not at
                                 // the drain above, because a press this block cannot send — the
@@ -12611,13 +12616,14 @@ impl RadioLoop {
                 }
             }
             // RX DSP levels: NR level (0..1) + AGC speed — applied on change like mic gain.
-            let (nr, agc, comp, notchf, analog) = {
+            let (nr, agc, comp, notchf, notchraw, analog) = {
                 let mut e = engine_lock(engine);
                 (
                     e.nr_level(),
                     e.agc_to_command(),
                     e.comp_level(),
                     e.notch_freq_hz(),
+                    e.take_notch_position_raw(),
                     [e.af_gain(), e.rf_gain(), e.squelch(), e.monitor_gain()],
                 )
             };
@@ -12719,6 +12725,14 @@ impl RadioLoop {
                         }
                         Err(_) => self.comp_level_giveup = Some(c),
                     }
+                }
+            }
+            if let Some(raw) = notchraw.filter(|_| self.applied.rig_model == 3073) {
+                if rig.set_notch_position_raw(raw).is_err() {
+                    engine_lock(engine).set_cat_status(
+                        self.cat_ok,
+                        "The radio did not accept the notch position".into(),
+                    );
                 }
             }
             if let Some(hz) = notchf {

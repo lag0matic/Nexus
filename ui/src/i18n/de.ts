@@ -7572,6 +7572,7 @@ export const DE: PartialCatalog = {
   "phone.rxDsp.comp.aria": "Sprachkompressor-Tiefe",
   "phone.rxDsp.notchFreq.title": "Frequenz des manuellen Notch-Filters — auf den störenden Pfeifton schieben. Das ist der Notch, den man selbst setzt, nicht der automatische.",
   "phone.rxDsp.notchFreq.aria": "Frequenz des manuellen Notch-Filters in Hertz",
+  "phone.rxDsp.notchPosition.aria": "Position des manuellen Notch-Filters",
   "phone.rxDsp.agc.aria": "AGC-Geschwindigkeit",
   "phone.rxDsp.agc.title": "AGC-Zeitkonstante",
   "phone.rxDsp.agc.auto": "Auto",

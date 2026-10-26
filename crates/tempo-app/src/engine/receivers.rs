@@ -229,6 +229,7 @@ pub struct Receiver {
     pub manual_notch: Option<bool>,
     /// Manual-notch frequency, Hz.
     pub notch_freq_hz: Option<f32>,
+    pub notch_position_raw: Option<u8>,
     /// RF (receive) gain, 0..1.
     pub rf_gain: Option<f32>,
     /// Squelch, 0..1.
@@ -284,6 +285,7 @@ impl Receiver {
             notch: None,
             manual_notch: None,
             notch_freq_hz: None,
+            notch_position_raw: None,
             rf_gain: None,
             squelch: None,
             att_db: None,
@@ -519,6 +521,9 @@ impl Engine {
             notch: self.rig_funcs[2],
             manual_notch: self.rig_funcs[5],
             notch_freq_hz: self.rig_notch_freq_hz.or(self.notch_freq_hz),
+            notch_position_raw: (self.settings.rig_model == 3073)
+                .then_some(self.rig_notch_position_raw)
+                .flatten(),
             rf_gain: self.rig_rf_gain.or(self.rf_gain),
             squelch: self.rig_squelch.or(self.squelch),
             att_db: self.rig_att_db,

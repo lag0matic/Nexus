@@ -171,6 +171,10 @@ pub trait RigBackend: Send + Sync {
     fn try_set_func(&self, token: &str, on: bool) -> Option<Result<(), SetFault>> {
         self.set_func(token, on).map(refused_unless)
     }
+    /// Start the radio's ATU (`G TUNE`), distinct from putting the tuner in line.
+    fn start_atu_tune(&self) -> Option<Result<(), SetFault>> {
+        None
+    }
     /// Key CW from text (`b TEXT`).
     fn send_morse(&self, _text: &str) -> Option<bool> {
         None
@@ -743,6 +747,9 @@ pub fn handle_command(line: &str, backend: &dyn RigBackend) -> Handled {
                     })
                 }
                 Some("v") => format!("{}\n", backend.vfo()),
+                Some("G") if p.next() == Some("TUNE") && p.next().is_none() => {
+                    rprt_ext_set(backend.start_atu_tune())
+                }
                 Some("V") => rprt(p.next().map(|v| backend.set_vfo(v)).unwrap_or(false)),
                 Some("t") => format!("{}\n", backend.ptt() as u8),
                 // RIG_PTT_ON=1, RIG_PTT_ON_MIC=2, RIG_PTT_ON_DATA=3 are all key-down;

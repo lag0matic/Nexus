@@ -339,6 +339,10 @@ pub fn rig_model_name(model: u32) -> Option<&'static str> {
 /// on the radio, and where the OLD answer was wrong the sequencer stood a live QSO down for a
 /// tune-up that never happened.
 pub fn hamlib_atu_start_tune_reaches(model: u32) -> bool {
+    if model == 3073 {
+        // IC-7300: G TUNE reaches icom_vfo_op's 1C 01 02, unlike U TUNER.
+        return true;
+    }
     /// `rigs/icom/*` — `icom_set_func` clamps the status to 0/1.
     const ICOM_BACKEND: u32 = 3;
     /// `rigs/kenwood/*` — `kenwood_set_func`'s `AC1x0` has no tune-start digit.
@@ -1688,7 +1692,8 @@ mod tests {
     /// wrongly disabled is worse than one that was already doing nothing.
     #[test]
     fn only_the_backends_that_carry_a_start_tune_keep_the_atu_button_live() {
-        for model in [3073, 3085, 3081, 3090, 3078] {
+        assert!(hamlib_atu_start_tune_reaches(3073), "IC-7300 has G TUNE");
+        for model in [3085, 3081, 3090, 3078] {
             let name = rig_model_name(model).unwrap();
             assert!(
                 !hamlib_atu_start_tune_reaches(model),

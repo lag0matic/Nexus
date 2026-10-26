@@ -1139,6 +1139,8 @@ pub struct ReceiverDto {
     pub manual_notch: Option<bool>,
     #[serde(default)]
     pub notch_freq_hz: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notch_position_raw: Option<u8>,
     #[serde(default)]
     pub rf_gain: Option<f32>,
     #[serde(default)]
@@ -1354,6 +1356,7 @@ impl From<&crate::engine::receivers::Receiver> for ReceiverDto {
             notch: r.notch,
             manual_notch: r.manual_notch,
             notch_freq_hz: r.notch_freq_hz,
+            notch_position_raw: r.notch_position_raw,
             rf_gain: r.rf_gain,
             squelch: r.squelch,
             att_db: r.att_db,
@@ -1686,6 +1689,9 @@ pub struct RadioStatus {
     /// not a level like the others. This is where the notch actually sits in the passband.
     #[serde(default)]
     pub notch_freq_hz: Option<f32>,
+    /// Uncalibrated manual-notch knob position, 0..255; never a frequency in Hz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notch_position_raw: Option<u8>,
     /// AF GAIN (0.0–1.0) — the rig's volume control, read back or commanded; `None` when the
     /// rig doesn't report it. ⚠️ On a station whose soundcard is fed from the rig's speaker
     /// or headphone jack this is ALSO the decoder's audio level, so zero here stops
@@ -5891,6 +5897,7 @@ mod receivers_dto_tests {
             notch,
             manual_notch: mn,
             notch_freq_hz: Some(1_234.0),
+            notch_position_raw: None,
             rf_gain: Some(0.375),
             squelch: Some(0.625),
             att_db: Some(12),

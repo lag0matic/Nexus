@@ -334,6 +334,7 @@ impl AppState {
                 manual_notch: None,
                 comp_level: None,
                 notch_freq_hz: None,
+                notch_position_raw: None,
                 atu: None, // engine fills from the CAT TUNER probe (None = no ATU on this rig)
                 atu_start_tune_unsupported: false, // …and with it, whether it can be STARTED
                 filter_width_hz: None, // engine fills from the CAT `m` passband read-back

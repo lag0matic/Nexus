@@ -5026,6 +5026,7 @@ export const FR: PartialCatalog = {
   "phone.rxDsp.comp.aria": "Profondeur du processeur de parole",
   "phone.rxDsp.comp.title": "Profondeur du processeur de parole — à quel point le compresseur travaille. Montez-la pour de la présence sur un trajet difficile ; trop, et le signal devient dur et éclabousse.",
   "phone.rxDsp.notchFreq.aria": "Fréquence du notch manuel en hertz",
+  "phone.rxDsp.notchPosition.aria": "Position du notch manuel",
   "phone.rxDsp.notchFreq.title": "Fréquence du notch manuel — amenez-la sur le sifflement à supprimer. C'est le notch que vous placez vous-même, pas l'automatique.",
   "phone.rxDsp.nr.aria": "Niveau de réduction de bruit",
   "phone.rxDsp.nr.title": "Profondeur de réduction de bruit — montez jusqu'à ce que le plancher de bruit baisse, redescendez si l'audio devient métallique",

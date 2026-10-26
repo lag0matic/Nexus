@@ -546,6 +546,11 @@ pub fn set_dsp_level(radio: u8, sub: u8, percent: u8) -> Frame {
 pub fn read_dsp_level(radio: u8, sub: u8) -> Frame {
     Frame::command(radio, 0x14, &[sub])
 }
+/// IC-7300 manual-notch knob position, not a calibrated audio frequency.
+pub fn set_notch_position_raw(radio: u8, position: u8) -> Frame {
+    let [hi, lo] = level_to_bcd2(u16::from(position));
+    Frame::command(radio, 0x14, &[0x0D, hi, lo])
+}
 /// Extract the raw level (0–255) from a `14 <sub>` reply.
 pub fn parse_dsp_level_raw(f: &Frame, sub: u8) -> Option<u16> {
     if f.cmd == 0x14 && f.data.first() == Some(&sub) && f.data.len() >= 3 {

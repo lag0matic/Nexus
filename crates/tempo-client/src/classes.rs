@@ -502,6 +502,7 @@ pub const CLASSES: &[(&str, Class, &str)] = &[
     ("set_monitor_gain",               RunsAtShack, "The shack's rig control."),
     ("set_msk144_period",              RunsAtShack, "The shack's MSK144 period setting; keys nothing."),
     ("set_notch_freq",                 RunsAtShack, "The shack's rig control."),
+    ("set_notch_position",             RunsAtShack, "The shack's rig control."),
     ("set_nr_level",                   RunsAtShack, "The shack's rig control."),
     ("set_operating_mode",             RunsAtShack, "The shack's section and rig mode; each transmission is its own press."),
     ("set_peg_lock",                   RunsAtShack, "The shack's band routing."),

@@ -12868,6 +12868,7 @@ export const EN = {
   'phone.rxDsp.notchFreq.title':
     'Manual notch frequency — slide it onto the whistle you want gone. This is the notch you place yourself, not the automatic one.',
   'phone.rxDsp.notchFreq.aria': 'Manual notch frequency in hertz',
+  'phone.rxDsp.notchPosition.aria': 'Manual notch position',
   'phone.rxDsp.agc.aria': 'AGC speed',
   'phone.rxDsp.agc.title': 'AGC time constant',
   // The five chips are words over stored tokens ('auto' / 'fast' / 'mid' / 'slow' /

@@ -16,7 +16,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { PhoneCockpit } from './PhoneCockpit'
-import { setRigFunc } from '../api'
+import { setRigFunc, setNotchPosition } from '../api'
 import type { AppSnapshot } from '../types'
 
 vi.mock('../api', () => ({
@@ -31,6 +31,7 @@ vi.mock('../api', () => ({
   // The two #95 additions.
   setCompLevel: vi.fn(async () => {}),
   setNotchFreq: vi.fn(async () => {}),
+  setNotchPosition: vi.fn(async () => ({})),
   setAgc: vi.fn(async () => ({})),
   setScopeSpan: vi.fn(async () => ({})),
   setScopeRef: vi.fn(async () => {}),
@@ -95,6 +96,21 @@ const mount = (radio: Record<string, unknown>) =>
   render(<PhoneCockpit snap={snapWith(radio)} theme="dark" />)
 
 describe('#95 — the controls that were missing', () => {
+  it('offers an IC-7300 raw-position slider without calling the Hz command', () => {
+    mount({ notchPositionRaw: 127, manualNotch: true })
+    const slider = screen.getByLabelText('Manual notch position') as HTMLInputElement
+    expect(slider.value).toBe('127')
+    expect(slider.min).toBe('0')
+    expect(slider.max).toBe('255')
+    expect(screen.queryByLabelText('Manual notch frequency in hertz')).toBeNull()
+    fireEvent.change(slider, { target: { value: '200' } })
+    expect(setNotchPosition).toHaveBeenCalledWith(200)
+  })
+
+  it('keeps the raw-position control disabled without CAT', () => {
+    mount({ notchPositionRaw: 127, catOk: false })
+    expect((screen.getByLabelText('Manual notch position') as HTMLInputElement).disabled).toBe(true)
+  })
   it('offers a manual-notch frequency slider when the rig reports one', () => {
     mount({ notchFreqHz: 1200 })
     const slider = screen.getByLabelText('Manual notch frequency in hertz') as HTMLInputElement

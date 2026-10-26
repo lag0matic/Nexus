@@ -8227,6 +8227,7 @@ export const JA: PartialCatalog = {
   "phone.rxDsp.comp.aria": "スピーチプロセッサーの深さ",
   "phone.rxDsp.notchFreq.title": "マニュアルノッチ周波数 — 消したいピー音の上にスライドさせてください。自動ではなく、自分で合わせるノッチです。",
   "phone.rxDsp.notchFreq.aria": "マニュアルノッチ周波数 (Hz)",
+  "phone.rxDsp.notchPosition.aria": "マニュアルノッチ位置",
   "phone.rxDsp.agc.aria": "AGC速度",
   "phone.rxDsp.agc.title": "AGC時定数",
   "phone.rxDsp.agc.auto": "オート",

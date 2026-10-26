@@ -97,6 +97,7 @@ import {
   setNrLevel,
   setCompLevel,
   setNotchFreq,
+  setNotchPosition,
   setAfGain,
   setRfGain,
   setSquelch,
@@ -716,18 +717,19 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
   // on a heterodyne by ear. A 10 Hz step is fine enough to null a tone and coarse enough to
   // sweep the passband without a hundred CAT writes.
   const [notchHz, setNotchHz] = useState(1000)
+  const rawNotch = snap.radio.notchPositionRaw != null
   const notchDragging = useRef(false)
   useEffect(() => {
-    const rb = snap.radio.notchFreqHz
+    const rb = snap.radio.notchPositionRaw ?? snap.radio.notchFreqHz
     if (rb != null && !notchDragging.current) {
       const hz = Math.round(rb)
-      setNotchHz((n) => (Math.abs(n - hz) >= 10 ? hz : n))
+      setNotchHz((n) => (Math.abs(n - hz) >= (rawNotch ? 1 : 10) ? hz : n))
     }
-  }, [snap.radio.notchFreqHz])
+  }, [snap.radio.notchFreqHz, snap.radio.notchPositionRaw, rawNotch])
   const shownNotch = notchHz
   const changeNotch = (hz: number) => {
     setNotchHz(hz)
-    void setNotchFreq(hz).catch(error => pushToast(String(error), 'error'))
+    void (rawNotch ? setNotchPosition(hz) : setNotchFreq(hz)).catch(error => pushToast(String(error), 'error'))
   }
   // The three analog levels, each the same shape as NR/COMP above: mirror the rig's own
   // value so the slider shows where the knob really is, and never fight an in-flight drag.
@@ -1692,7 +1694,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
     catOk,
     // The STICKY answer, never the raw `!= null` — a QSY blanks every reading, and the
     // registry must never read that flicker as a radio losing a feature.
-    reported: (c: RigControl) => (c.field ? reports(c.field) : false),
+    reported: (c: RigControl) => (c.field ? reports(c.field) : false) || (c.id === 'NOTCHF' && reports('notchPositionRaw')),
     mode: commandedMode,
     // ⭐ THE FIRST CAPS THE REGISTRY HAS EVER BEEN GIVEN (2026-09-22), and only the half the
     // backend actually ships: `attStepsDb` / `preampStepsDb`, the pads and preamps this
@@ -2310,14 +2312,14 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
                 radio, and the operator would go looking for a fault that is not there. */}
             {show('NOTCHF') && (
             <div className="ph-chain-item" data-chain="NOTCHF">
-              <label className="ph-dsplev" title={t('phone.rxDsp.notchFreq.title')}>
+              <label className="ph-dsplev" title={t(rawNotch ? 'phone.rxDsp.notchPosition.aria' : 'phone.rxDsp.notchFreq.title')}>
                 <span>{NOTCH}</span>
-                <WheelRange wheelStep={10} disabled={dead('NOTCHF')}
+                <WheelRange wheelStep={rawNotch ? 1 : 10} disabled={dead('NOTCHF')}
                   aria-describedby={describedBy('rx')}
                   type="range"
-                  min={300}
-                  max={3400}
-                  step={10}
+                  min={rawNotch ? 0 : 300}
+                  max={rawNotch ? 255 : 3400}
+                  step={rawNotch ? 1 : 10}
                   value={shownNotch}
                   onChange={(e) => changeNotch(Number(e.target.value))}
                   onPointerDown={() => {
@@ -2326,9 +2328,9 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
                   onPointerUp={() => {
                     notchDragging.current = false
                   }}
-                  aria-label={t('phone.rxDsp.notchFreq.aria')}
+                  aria-label={t(rawNotch ? 'phone.rxDsp.notchPosition.aria' : 'phone.rxDsp.notchFreq.aria')}
                 />
-                <span className="ph-power-val">{dead('NOTCHF') ? '—' : `${shownNotch} ${HZ}`}</span>
+                <span className="ph-power-val">{dead('NOTCHF') ? '—' : rawNotch ? `${shownNotch} / 255` : `${shownNotch} ${HZ}`}</span>
               </label>
             </div>
             )}

@@ -1339,6 +1339,7 @@ export interface ReceiverStatus {
   notch?: boolean | null
   manualNotch?: boolean | null
   notchFreqHz?: number | null
+  notchPositionRaw?: number | null
   rfGain?: number | null
   squelch?: number | null
   attDb?: number | null
@@ -1429,6 +1430,8 @@ export interface RadioStatus {
   compLevel?: number | null
   /** MANUAL-notch frequency in HZ — not a 0..1 level. Null when the rig has no NOTCHF. */
   notchFreqHz?: number | null
+  /** Manual-notch knob position, 0..255; not calibrated in Hz. */
+  notchPositionRaw?: number | null
   /** AF gain (the rig's volume) 0.0–1.0 — rig read-back or commanded; absent when the rig
    * doesn't report it. ⚠️ On a station whose soundcard is fed from the rig's speaker or
    * headphone jack this is ALSO the decoder's audio level, so zero here stops FT8/RTTY/PSK.

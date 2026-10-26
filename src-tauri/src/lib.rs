@@ -21060,6 +21060,13 @@ fn set_notch_freq(state: State<'_, SharedEngine>, hz: f32) -> Result<AppSnapshot
     Ok(eng.snapshot())
 }
 
+#[tauri::command(async)]
+fn set_notch_position(state: State<'_, SharedEngine>, position: u8) -> Result<AppSnapshot, String> {
+    let mut eng = engine_lock(&state);
+    eng.set_notch_position_raw(position)?;
+    Ok(eng.snapshot())
+}
+
 /// Set AF GAIN as a 0.0–1.0 fraction — the rig's volume; the radio loop applies it.
 ///
 /// ⚠️ ON SOME STATIONS THIS IS ALSO THE DECODER'S AUDIO LEVEL. A soundcard fed from the rig's
@@ -40438,6 +40445,7 @@ pub(crate) fn app_commands() -> Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + 
         set_nr_level,
         set_comp_level,
         set_notch_freq,
+        set_notch_position,
         set_af_gain,
         set_monitor_gain,
         set_att_db,

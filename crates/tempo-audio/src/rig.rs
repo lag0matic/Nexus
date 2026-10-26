@@ -184,6 +184,8 @@ pub fn func_line(func: &str, value: u8) -> String {
 /// so [`crate::rigmodels::hamlib_atu_start_tune_reaches`] answers the capability from the
 /// model, the engine's ATU gate refuses the press, and the cockpit disables the button with a
 /// reason. The native Icom (CI-V) path is where those rigs get a real tune-up.
+/// The IC-7300 now uses the separate `G TUNE` operation through [`Rig::start_atu_tune`]
+/// on both Hamlib and native CI-V; this constant still describes only `U TUNER`.
 ///
 /// ⚠️ AND NOT ON THE FT-710, whose `AC` P3 2 is unused and whose tuning start is 3 (Yaesu's
 /// FT-710 CAT manual, page 8): the radio loop sends
@@ -1540,6 +1542,33 @@ impl Rig {
         }
     }
 
+    pub fn start_atu_tune(&mut self, model: u32) -> FuncSet {
+        if model != 3073 {
+            return self.set_func_value(
+                "TUNER",
+                crate::rigmodels::hamlib_atu_start_tune_value(model),
+            );
+        }
+        if self.control.is_none() {
+            return FuncSet::Refused("not a CAT rig".into());
+        }
+        match self.command("G TUNE\n") {
+            Ok(reply) if reply_ok(&reply) => FuncSet::Ok,
+            Ok(reply) if rprt_code(&reply).is_some_and(rprt_is_link_fault) => {
+                FuncSet::Uncertain("no verdict on ATU tune".into())
+            }
+            Ok(reply) if rprt_code(&reply).is_none() => {
+                FuncSet::Uncertain("unrecognized reply to ATU tune".into())
+            }
+            Ok(reply) => FuncSet::Refused(format!("the rig refused ATU tune: {reply}")),
+            Err(e) => FuncSet::Uncertain(format!("no verdict on ATU tune: {e}")),
+        }
+    }
+
+    pub fn set_notch_position_raw(&mut self, position: u8) -> std::io::Result<()> {
+        self.cat(&level_line("NOTCHF_RAW", &position.to_string()))
+    }
+
     pub fn read_freq(&mut self) -> std::io::Result<u64> {
         if self.control.is_none() {
             return Err(std::io::Error::other("not a CAT rig"));
@@ -1967,6 +1996,35 @@ impl Drop for Rig {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ic7300_atu_uses_the_tune_operation_and_keeps_uncertain_separate() {
+        use super::*;
+        for (reply, outcome) in [
+            ("RPRT 0\n", 0),
+            ("RPRT -1\n", 1),
+            ("RPRT -5\n", 2),
+            ("garbled\n", 2),
+        ] {
+            let (addr, log) = mock_rigctld(move |_| reply.into());
+            let mut rig = Rig::rigctld(&addr);
+            assert!(matches!(
+                (rig.start_atu_tune(3073), outcome),
+                (FuncSet::Ok, 0) | (FuncSet::Refused(_), 1) | (FuncSet::Uncertain(_), 2)
+            ));
+            assert!(log.lock().unwrap().iter().any(|line| line == "G TUNE"));
+            assert!(!log
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| line.starts_with("U TUNER")));
+        }
+        let (addr, log) = mock_rigctld(|_| "RPRT 0\n".into());
+        assert!(matches!(
+            Rig::rigctld(&addr).start_atu_tune(1049),
+            FuncSet::Ok
+        ));
+        assert!(log.lock().unwrap().iter().any(|line| line == "U TUNER 3"));
+    }
     /// A powered-off rig answers `RPRT -5`; the radio loop must see a LINK fault, not a
     /// refusal — that misread is what latched the band give-up on a radio that was only off.
     #[test]

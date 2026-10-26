@@ -869,6 +869,15 @@ impl CivBackend {
 
     /// [`RigBackend::set_level`] for receiver `rx`.
     fn set_level_on(&self, rx: ReceiverId, name: &str, value: &str) -> Option<bool> {
+        if name == "NOTCHF_RAW" {
+            if self.model != Some(IcomModel::Ic7300) || rx != ReceiverId::Main {
+                return None;
+            }
+            let Ok(raw) = value.parse::<u8>() else {
+                return Some(false);
+            };
+            return Some(self.ack(commands::set_notch_position_raw(self.addr, raw)));
+        }
         let who = Self::level_target(rx, level_names_a_receiver(name))?;
         match name {
             "RFPOWER" => {
@@ -939,6 +948,19 @@ impl CivBackend {
 
     /// [`RigBackend::func`] for receiver `rx`.
     fn func_on(&self, rx: ReceiverId, token: &str) -> Option<bool> {
+        if token == "TUNER" {
+            if self.model != Some(IcomModel::Ic7300) || rx != ReceiverId::Main {
+                return None;
+            }
+            let f = self
+                .read(Frame::command(self.addr, 0x1C, &[0x01]), 0x1C, Some(0x01))
+                .ok()?;
+            return f
+                .data
+                .get(1)
+                .filter(|&&state| state <= 2)
+                .map(|&state| state != 0);
+        }
         // DSP / audio funcs share CI-V command 0x16; the token → sub-command map lives in
         // commands::func_sub. RIT/XIT are separate registers with no simple read here.
         let sub = commands::func_sub(token)?;
@@ -954,6 +976,12 @@ impl CivBackend {
 
     /// [`RigBackend::set_func`] for receiver `rx`.
     fn set_func_on(&self, rx: ReceiverId, token: &str, on: bool) -> Option<bool> {
+        if token == "TUNER" {
+            if self.model != Some(IcomModel::Ic7300) || rx != ReceiverId::Main {
+                return None;
+            }
+            return Some(self.ack(Frame::command(self.addr, 0x1C, &[0x01, u8::from(on)])));
+        }
         // No ΔTX, no ΔTX switch: `21 02` is not a command this radio has, so it is not sent,
         // whichever receiver is named. `None` is `RPRT -11`, the answer Hamlib gives for the
         // same radio.
@@ -1357,7 +1385,25 @@ impl RigBackend for CivBackend {
     // caller naming the Sub will use; see the module note for how the naming is carried.
 
     fn level(&self, name: &str) -> Option<String> {
+        if name == "NOTCHF_RAW" && self.model == Some(IcomModel::Ic7300) {
+            let f = self
+                .read(commands::read_dsp_level(self.addr, 0x0D), 0x14, Some(0x0D))
+                .ok()?;
+            return commands::parse_dsp_level_raw(&f, 0x0D)
+                .and_then(|raw| u8::try_from(raw).ok())
+                .map(|raw| raw.to_string());
+        }
         self.level_on(ReceiverId::Main, name)
+    }
+
+    fn start_atu_tune(&self) -> Option<Result<(), SetFault>> {
+        if self.model != Some(IcomModel::Ic7300) {
+            return None;
+        }
+        if self.keying_refused("G TUNE").is_some() {
+            return Some(Err(SetFault::Refused));
+        }
+        Some(self.answer(Frame::command(self.addr, 0x1C, &[0x01, 0x02])))
     }
 
     fn set_level(&self, name: &str, value: &str) -> Option<bool> {
@@ -2359,6 +2405,71 @@ mod tests {
             "the notch register must stay out of this; {:02x?}",
             r.log
         );
+    }
+
+    #[test]
+    fn ic7300_native_notch_position_is_raw_and_tuner_start_is_not_tuner_on() {
+        let (radio, _) = FakeRadio::new(0x94);
+        let regs = radio.regs();
+        let d =
+            CivDaemon::start_with_io(Box::new(radio), 0x94, 0, 1, Some(IcomModel::Ic7300)).unwrap();
+        let (mut c, mut rd) = client(d.local_addr.port());
+        assert_eq!(roundtrip(&mut c, &mut rd, "l NOTCHF_RAW\n"), "0\n");
+        assert_eq!(roundtrip(&mut c, &mut rd, "L NOTCHF_RAW 127\n"), "RPRT 0\n");
+        assert_eq!(roundtrip(&mut c, &mut rd, "l NOTCHF_RAW\n"), "127\n");
+        assert!(regs
+            .lock()
+            .unwrap()
+            .log
+            .contains(&(0x14, vec![0x0D, 0x01, 0x27])));
+        let before = regs.lock().unwrap().log.len();
+        for value in ["-1", "256", "0.5", "NaN"] {
+            assert_eq!(
+                roundtrip(&mut c, &mut rd, &format!("L NOTCHF_RAW {value}\n")),
+                "RPRT -1\n"
+            );
+        }
+        assert_eq!(regs.lock().unwrap().log.len(), before);
+        assert_eq!(roundtrip(&mut c, &mut rd, "l NOTCHF\n"), "RPRT -11\n");
+        assert_eq!(roundtrip(&mut c, &mut rd, "u TUNER\n"), "0\n");
+        assert_eq!(roundtrip(&mut c, &mut rd, "U TUNER 1\n"), "RPRT 0\n");
+        assert_eq!(regs.lock().unwrap().tuner_state, 1);
+        assert_eq!(roundtrip(&mut c, &mut rd, "G TUNE\n"), "RPRT 0\n");
+        assert_eq!(regs.lock().unwrap().tuner_state, 2);
+        assert!(regs.lock().unwrap().log.contains(&(0x1C, vec![0x01, 0x02])));
+        regs.lock().unwrap().reject_tuner_start = true;
+        assert_eq!(roundtrip(&mut c, &mut rd, "G TUNE\n"), "RPRT -1\n");
+        regs.lock().unwrap().reject_tuner_start = false;
+        regs.lock().unwrap().drop_tuner_start = true;
+        assert_eq!(roundtrip(&mut c, &mut rd, "G TUNE\n"), "RPRT -5\n");
+    }
+
+    #[test]
+    fn ic7300_native_atu_obeys_the_transport_keying_policy() {
+        let (radio, _) = FakeRadio::new(0x94);
+        let regs = radio.regs();
+        let d = CivDaemon::start_with_link(
+            Box::new(radio),
+            0x94,
+            0,
+            1,
+            Some(IcomModel::Ic7300),
+            Link {
+                deadline: Duration::from_millis(100),
+                keying: KeyingPolicy::Refused("test transport cannot transmit"),
+            },
+        )
+        .unwrap();
+        let (mut c, mut rd) = client(d.local_addr.port());
+        let before = regs.lock().unwrap().log.len();
+        assert_eq!(roundtrip(&mut c, &mut rd, "G TUNE\n"), "RPRT -1\n");
+        assert!(
+            regs.lock().unwrap().log[before..]
+                .iter()
+                .all(|(cmd, data)| { !(*cmd == 0x1C && data == &[0x01, 0x02]) }),
+            "no tune-start frame reached the radio"
+        );
+        assert_eq!(roundtrip(&mut c, &mut rd, "U TUNER 0\n"), "RPRT 0\n");
     }
 
     #[test]
