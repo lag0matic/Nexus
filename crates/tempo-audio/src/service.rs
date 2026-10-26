@@ -34168,7 +34168,7 @@ mod tests {
                         dial.as_str()
                     } else if l == "u TUNER" {
                         "1\n"
-                    } else if l == "U TUNER 2" {
+                    } else if l == "U TUNER 2" || l == "G TUNE" {
                         tune_reply
                     } else {
                         "RPRT 0\n"
@@ -34363,17 +34363,17 @@ mod tests {
         assert!(log.lock().unwrap().iter().any(|l| l == "T 0"));
     }
 
-    /// ⭐ Operator ruling (2026-09-19): "Say it can't, add it natively." Hamlib's Icom and
-    /// Kenwood backends CLAMP `set_func TUNER 2` to "switch the tuner in line" (icom.c:7085 —
-    /// `fctbuf[0] = status ? 0x01 : 0x00`) and answer `RPRT 0` while doing it, so the reply
-    /// cannot tell a tune-up from a no-op. The capability is read off the MODEL at the tuner
-    /// probe, and the press then never leaves the building — which is also what stops the
-    /// Digital section standing down for a tune-up that never happened (#322 / R4).
+    /// Icom's U TUNER cannot start a tune. The verified IC-7300 alternate is G TUNE;
+    /// an unverified Icom remains refused and the Yaesu path remains unchanged.
     #[test]
-    fn an_atu_press_never_reaches_a_hamlib_icom() {
-        // An IC-7300 against the FTDX10 the #322 fix was reported on: same scene, same mock,
+    fn an_atu_press_only_uses_verified_start_paths() {
+        // The IC-7300, an unsupported IC-7610 and the FTDX10: same scene, same mock,
         // same press — only the catalogue model differs.
-        for (model, tunes) in [(3073_u32, false), (1042_u32, true)] {
+        for (model, command) in [
+            (3073_u32, Some("G TUNE")),
+            (3085, None),
+            (1042, Some("U TUNER 2")),
+        ] {
             let engine = atu_engine();
             {
                 let mut e = engine.lock().unwrap();
@@ -34394,23 +34394,66 @@ mod tests {
             let press = engine.lock().unwrap().atu_tune();
             assert_eq!(
                 press.is_ok(),
-                tunes,
+                command.is_some(),
                 "model {model}: the gate must answer the capability the probe found — {press:?}"
             );
             run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 3);
             // Snapshotted, not locked twice: the message arm of an assert holding the same
             // guard deadlocks the moment it has something to say.
             let sent = log.lock().unwrap().clone();
+            let starts: Vec<&str> = sent
+                .iter()
+                .map(String::as_str)
+                .filter(|line| line.starts_with("U TUNER") || *line == "G TUNE")
+                .collect();
             assert_eq!(
-                sent.iter().any(|l| l == "U TUNER 2"),
-                tunes,
-                "model {model}: what reached the radio — saw {sent:?}"
+                starts,
+                command.into_iter().collect::<Vec<_>>(),
+                "model {model}: {sent:?}"
             );
         }
     }
 
+    #[test]
+    fn ic7300_atu_service_keeps_refusal_uncertainty_and_gate_changes_distinct() {
+        for (reply, disable_before_wire, stands_down, reaches_wire) in [
+            ("RPRT 0\n", false, true, true),
+            ("RPRT -1\n", false, false, true),
+            (ATU_SILENT, false, true, true),
+            (ATU_HANGUP, false, true, true),
+            ("RPRT 0\n", true, true, false),
+        ] {
+            let engine = Arc::new(Mutex::new(Engine::new("W9XYZ", "EN37", 0)));
+            {
+                let mut e = engine.lock().unwrap();
+                let mut settings = e.settings().clone();
+                settings.rig_model = 3073;
+                e.apply_settings(settings);
+                e.set_frequency(14.074, "20m", "USB");
+                e.set_tx_enabled(true);
+            }
+            let (addr, log) = mock_rigctld_with_atu_answering(14_074_000, reply);
+            let mut rig = Rig::rigctld(&addr);
+            let mut backend = MockBackend::new();
+            let mut state = loop_state_for(&engine);
+            run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 3);
+            engine.lock().unwrap().atu_tune().unwrap();
+            if disable_before_wire {
+                engine.lock().unwrap().set_tx_enabled(false);
+            }
+            run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 3);
+            let sent = log.lock().unwrap().clone();
+            assert_eq!(
+                sent.iter().filter(|line| *line == "G TUNE").count(),
+                usize::from(reaches_wire)
+            );
+            assert!(!sent.iter().any(|line| line.starts_with("U TUNER")));
+            assert_eq!(!engine.lock().unwrap().tx_enabled(), stands_down);
+        }
+    }
+
     /// Every `U TUNER` line an operator's ATU press puts on the wire for a radio of Hamlib
-    /// `model`: the scene, the stub and the press of `an_atu_press_never_reaches_a_hamlib_icom`,
+    /// `model`: the scene, the stub and the press of `an_atu_press_only_uses_verified_start_paths`,
     /// with only the model differing.
     fn tuner_lines_an_atu_press_sends(model: u32) -> Vec<String> {
         let engine = atu_engine();
