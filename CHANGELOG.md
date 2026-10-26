@@ -5,6 +5,13 @@ All notable changes to Nexus (formerly Tempo) are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0-longwave.2] - 2026-10-26
+
+### Fixed
+- IC-7300 manual notch position through Hamlib and native CI-V, shown as the radio's 0..255 knob position rather than an uncalibrated frequency.
+- IC-7300 ATU tune-start through the dedicated G TUNE operation, preserving the engine and transport transmit gates and uncertain-acknowledgement handling.
+- Native IC-7300 tuner state and on/off commands. These additions require live radio acceptance; automated verification uses simulated radio I/O only.
+
 ## [1.21.0-longwave.1] - 2026-10-26
 
 ### Added
