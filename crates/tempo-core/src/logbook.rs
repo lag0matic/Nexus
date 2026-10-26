@@ -1052,6 +1052,9 @@ impl UploadState {
     /// what keeps two instances sharing one log from losing an upload stamp to the other's
     /// full-file rewrite — and lets the second instance see "already sent" so it doesn't
     /// re-upload the same QSO.
+    /// Longwave is evidence-based instead: remote history proves receipt even with an older
+    /// or unknown time. Once accepted, imports retain that stamp verbatim, so repeated history
+    /// syncs neither demote it nor churn its timestamp. Explicit stamps still record attempts.
     pub fn merge_recent(&mut self, other: &UploadState) {
         fn pick(a: &mut Option<UploadStatus>, b: &Option<UploadStatus>) {
             if let Some(bs) = b {
@@ -1064,7 +1067,21 @@ impl UploadState {
         pick(&mut self.eqsl, &other.eqsl);
         pick(&mut self.qrz, &other.qrz);
         pick(&mut self.clublog, &other.clublog);
-        pick(&mut self.longwave, &other.longwave);
+        if !self
+            .longwave
+            .as_ref()
+            .is_some_and(|s| s.outcome == UploadOutcome::Accepted)
+        {
+            if other
+                .longwave
+                .as_ref()
+                .is_some_and(|s| s.outcome == UploadOutcome::Accepted)
+            {
+                self.longwave = other.longwave.clone();
+            } else {
+                pick(&mut self.longwave, &other.longwave);
+            }
+        }
     }
 }
 

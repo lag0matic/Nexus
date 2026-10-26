@@ -128,7 +128,7 @@ fn longwave_import_upgrades_matching_local_row_without_qsl_confirmation() {
     remote.upload.longwave = Some(status(UploadOutcome::Accepted, 200));
     let (added, skipped, merged) = book.import_adif(&adif_record_own_log(&remote));
     assert!(added.is_empty());
-    assert_eq!((merged, skipped), (1, 0));
+    assert_eq!((merged, skipped), (1, 1));
     assert_eq!(book.len(), 1);
     assert_eq!(book.records()[0].id, Some(id));
     assert_eq!(book.records()[0].upload.longwave, remote.upload.longwave);
@@ -165,4 +165,93 @@ fn longwave_merge_is_per_service_and_keeps_newer_stamps() {
     });
     assert_eq!(local.longwave, Some(status(UploadOutcome::Accepted, 200)));
     assert_eq!(local.qrz, Some(status(UploadOutcome::Accepted, 400)));
+}
+
+#[test]
+fn longwave_history_receipt_promotes_pending_even_with_an_older_or_unknown_time() {
+    for receipt_time in [100, 0] {
+        let mut book = Logbook::new();
+        let id = book.add(record());
+        let pushed = QsoRecord::clone(&book.records()[0]);
+        assert!(book.stamp_longwave_upload(&pushed, status(UploadOutcome::Pending, 200)));
+        let mut remote = record();
+        remote.upload.longwave = Some(status(UploadOutcome::Accepted, receipt_time));
+        let (added, skipped, merged) = book.import_adif(&adif_record_own_log(&remote));
+        assert!(added.is_empty());
+        assert_eq!((skipped, merged), (1, 1));
+        assert_eq!(book.records()[0].id, Some(id));
+        assert_eq!(book.records()[0].upload.longwave, remote.upload.longwave);
+        unconfirmed(&book.records()[0]);
+
+        let accepted = book.records()[0].clone();
+        for outcome in [
+            UploadOutcome::Accepted,
+            UploadOutcome::Pending,
+            UploadOutcome::Rejected,
+            UploadOutcome::AuthFail,
+            UploadOutcome::Duplicate,
+        ] {
+            for when in [0, 50, 100, 200, 300] {
+                remote.upload.longwave = Some(status(outcome, when));
+                let (added, skipped, merged) = book.import_adif(&adif_record_own_log(&remote));
+                assert!(added.is_empty());
+                assert_eq!((skipped, merged), (1, 0), "{outcome:?}@{when}");
+                assert_eq!(book.records()[0], accepted);
+                assert!(std::sync::Arc::ptr_eq(&book.records()[0], &accepted));
+            }
+        }
+        let (added, skipped, merged) = book.import_adif(CONTACT);
+        assert!(added.is_empty());
+        assert_eq!((skipped, merged), (1, 0));
+        assert_eq!(book.records()[0], accepted);
+    }
+}
+
+#[test]
+fn longwave_receipt_precedence_does_not_change_other_services_timestamp_rule() {
+    for (local_outcome, incoming_outcome, local_time, incoming_time, expected) in [
+        (
+            UploadOutcome::Pending,
+            UploadOutcome::Accepted,
+            200,
+            100,
+            UploadOutcome::Pending,
+        ),
+        (
+            UploadOutcome::Accepted,
+            UploadOutcome::Pending,
+            100,
+            200,
+            UploadOutcome::Pending,
+        ),
+        (
+            UploadOutcome::Accepted,
+            UploadOutcome::Rejected,
+            100,
+            200,
+            UploadOutcome::Rejected,
+        ),
+    ] {
+        let mut local = UploadState {
+            lotw: Some(status(local_outcome, local_time)),
+            eqsl: Some(status(local_outcome, local_time)),
+            qrz: Some(status(local_outcome, local_time)),
+            clublog: Some(status(local_outcome, local_time)),
+            longwave: None,
+        };
+        local.merge_recent(&UploadState {
+            lotw: Some(status(incoming_outcome, incoming_time)),
+            eqsl: Some(status(incoming_outcome, incoming_time)),
+            qrz: Some(status(incoming_outcome, incoming_time)),
+            clublog: Some(status(incoming_outcome, incoming_time)),
+            longwave: None,
+        });
+        for slot in [&local.lotw, &local.eqsl, &local.qrz, &local.clublog] {
+            assert_eq!(slot.as_ref().unwrap().outcome, expected);
+            assert_eq!(
+                slot.as_ref().unwrap().when_unix,
+                local_time.max(incoming_time)
+            );
+        }
+    }
 }
