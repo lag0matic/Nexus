@@ -610,7 +610,7 @@ fn fullness(r: &QsoRecord) -> usize {
 /// How many services a copy has been sent to ([`super::UploadOutcome::is_sent`]).
 fn sent_to(r: &QsoRecord) -> usize {
     let u = &r.upload;
-    [&u.lotw, &u.eqsl, &u.qrz, &u.clublog]
+    [&u.lotw, &u.eqsl, &u.qrz, &u.clublog, &u.longwave]
         .into_iter()
         .filter(|s| s.as_ref().is_some_and(|s| s.outcome.is_sent()))
         .count()
@@ -921,6 +921,7 @@ pub fn merge(copies: &[QsoRecord], keep: usize, choices: &HashMap<String, Record
             (&mut o.eqsl, &u.eqsl),
             (&mut o.qrz, &u.qrz),
             (&mut o.clublog, &u.clublog),
+            (&mut o.longwave, &u.longwave),
         ] {
             let sent =
                 |s: &Option<super::UploadStatus>| s.as_ref().is_some_and(|s| s.outcome.is_sent());

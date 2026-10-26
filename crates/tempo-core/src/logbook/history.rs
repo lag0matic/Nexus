@@ -125,11 +125,12 @@ CREATE INDEX IF NOT EXISTS qso_history_deleted ON qso_history(seq) WHERE kind = 
 ";
 
 /// The tags an upload stamp is written as. Never compared, never recorded, never undone.
-pub const UPLOAD_TAGS: [&str; 4] = [
+pub const UPLOAD_TAGS: [&str; 5] = [
     "APP_TEMPO_UL_LOTW",
     "APP_TEMPO_UL_EQSL",
     "APP_TEMPO_UL_QRZ",
     "APP_TEMPO_UL_CLUBLOG",
+    "APP_TEMPO_UL_LONGWAVE",
 ];
 
 /// Who made a change.

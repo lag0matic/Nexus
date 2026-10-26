@@ -192,6 +192,63 @@ fn a_stamp_and_a_change_without_a_note_write_no_history() {
     assert_eq!(count(&db, "history_run"), 0, "nor is its run");
 }
 
+#[test]
+fn longwave_stamps_leave_the_edit_key_and_history_unchanged_but_count_as_uploaded_since() {
+    for outcome in [UploadOutcome::Pending, UploadOutcome::Accepted] {
+        let mut db = LogDb::open_in_memory().unwrap();
+        let a = rec("W1AW", 1);
+        write(
+            &mut db,
+            std::slice::from_ref(&a),
+            Some(&note("new", Source::Operator, Kind::Edit)),
+        )
+        .unwrap();
+        let entry = db.history_of(a.id.unwrap()).unwrap().remove(0);
+        assert!(!entry.uploaded_since(&a));
+        let mut stamped = a.clone();
+        stamped.upload.longwave = Some(UploadStatus {
+            outcome,
+            when_unix: 100,
+            detail: None,
+        });
+        assert_eq!(content_key(&a), content_key(&stamped));
+        assert_eq!(diff(&a, &stamped), None);
+        assert!(entry.uploaded_since(&stamped));
+        write(
+            &mut db,
+            std::slice::from_ref(&stamped),
+            Some(&note("stamp", Source::Operator, Kind::Edit)),
+        )
+        .unwrap();
+        assert_eq!(count(&db, "qso_history"), 1);
+        assert_eq!(count(&db, "history_run"), 1);
+        // Control: actual contact content still changes the edit key and history diff.
+        stamped.notes = Some("operator note".into());
+        assert_ne!(content_key(&a), content_key(&stamped));
+        assert!(diff(&a, &stamped).is_some());
+
+        let mut db = LogDb::open_in_memory().unwrap();
+        stamped.notes = None;
+        write(
+            &mut db,
+            std::slice::from_ref(&stamped),
+            Some(&note("import", Source::Import, Kind::Merge)),
+        )
+        .unwrap();
+        let arrived = db.history_of(a.id.unwrap()).unwrap().remove(0);
+        assert!(arrived
+            .after
+            .as_deref()
+            .unwrap()
+            .contains("APP_TEMPO_UL_LONGWAVE"));
+        assert!(!arrived.uploaded_since(&stamped));
+        assert!(
+            arrived.uploaded_since(&a),
+            "clearing a stamp is detected too"
+        );
+    }
+}
+
 /// ★ A change and its history land together, or neither does: a batch the store refuses part-way
 /// (a row with no id, after a good one) leaves no row and no history; one refused by its check
 /// (another window changed a row) leaves none either.

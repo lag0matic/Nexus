@@ -1072,6 +1072,53 @@ fn of_equal_copies_the_one_sent_is_kept() {
     );
 }
 
+#[test]
+fn duplicate_cleanup_preserves_longwave_pending_and_accepted_receipts() {
+    for outcome in [UploadOutcome::Pending, UploadOutcome::Accepted] {
+        let (a, mut b) = pair("W1AW", "W1AW");
+        b.upload.longwave = Some(UploadStatus {
+            outcome,
+            when_unix: 100,
+            detail: None,
+        });
+        let copies = [a.clone(), b.clone()];
+        assert_eq!(suggested_keep(&copies), 1);
+        let kept = merge(&copies, suggested_keep(&copies), &HashMap::new()).record;
+        assert_eq!(kept.upload.longwave, b.upload.longwave);
+        assert!(!kept.confirmed && !kept.award_confirmed && !kept.qsl_rcvd.any());
+
+        // Control: a refused upload does not cause a duplicate to be preferred.
+        b.upload.longwave.as_mut().unwrap().outcome = UploadOutcome::Rejected;
+        assert_eq!(suggested_keep(&[a, b]), 0);
+    }
+}
+
+#[test]
+fn portable_call_cleanup_carries_longwave_pending_and_accepted_receipts() {
+    for outcome in [UploadOutcome::Pending, UploadOutcome::Accepted] {
+        for (kept_call, sent_call) in [("KD9TAW", "KD9TAW/P"), ("KD9TAW/P", "KD9TAW")] {
+            let (mut a, mut b) = pair("W1AW", "W1AW");
+            a.station_callsign = Some(kept_call.into());
+            b.station_callsign = Some(sent_call.into());
+            b.upload.longwave = Some(UploadStatus {
+                outcome,
+                when_unix: 100,
+                detail: None,
+            });
+            // Even when the operator keeps the unstamped copy, preserve the other spelling's
+            // receipt or uncertain POST intent so it cannot cause a duplicate upload.
+            let merged = merge(&[a.clone(), b.clone()], 0, &HashMap::new()).record;
+            assert_eq!(merged.upload.longwave, b.upload.longwave);
+            assert!(!merged.confirmed && !merged.award_confirmed && !merged.qsl_rcvd.any());
+
+            // Control: a different station identity must not donate its receipt.
+            b.station_callsign = Some("KD9TAW/M".into());
+            let merged = merge(&[a, b], 0, &HashMap::new()).record;
+            assert_eq!(merged.upload.longwave, None);
+        }
+    }
+}
+
 /// ★ A GRID IS ONE GRID AT ANY PRECISION. One logger writes the 4-character square, another the
 /// 6-character subsquare: `FN31` and `FN31PR` (case aside) are one contact, either grid. Squares
 /// that truly differ are still two. The merge still names the grid for the operator to choose.
