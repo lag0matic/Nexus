@@ -57599,6 +57599,7 @@ mod remote_credential_reply_tests {
             (HRDLOG_KEYCHAIN_USER, "Qw2eRt56Bn8Y"),
             (WRL_KEYCHAIN_USER, "Lk9jHg07Cv4E"),
             (CLOUDLOG_KEYCHAIN_USER, CLOUDLOG_KEY),
+            (LONGWAVE_KEYCHAIN_USER, "MadeUpLongwaveTokenForTests"),
             (REPEATERBOOK_KEYCHAIN_USER, "rbuapp_Pq8oIu65Fd2A"),
             (WINLINK_KEYCHAIN_USER, "Yt6rEw34Sx1Q"),
         ])
@@ -57760,6 +57761,7 @@ mod remote_credential_reply_tests {
             QRZ_LOGBOOK_KEYCHAIN_USER,
             CLUBLOG_KEYCHAIN_USER,
             WRL_KEYCHAIN_USER,
+            LONGWAVE_KEYCHAIN_USER,
             REPEATERBOOK_KEYCHAIN_USER,
         ];
         let second = [
@@ -57779,6 +57781,7 @@ mod remote_credential_reply_tests {
                 ("hrdlog", !saved_first),
                 ("wrl", saved_first),
                 ("cloudlog", !saved_first),
+                ("longwave", saved_first),
                 ("repeaterbook", saved_first),
                 ("winlink", !saved_first),
             ]
@@ -57786,7 +57789,7 @@ mod remote_credential_reply_tests {
             .map(|(id, stored)| (id.to_string(), stored))
             .collect()
         };
-        for (saved, saved_first) in [(&first, true), (&second, false)] {
+        for (saved, saved_first) in [(first.as_slice(), true), (second.as_slice(), false)] {
             let (rows, reply) = badges(saved);
             assert_eq!(stored_by_id(&rows), expect(saved_first));
             assert_eq!(
