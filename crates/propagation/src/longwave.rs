@@ -18,6 +18,8 @@ use std::time::Duration;
 
 mod tls;
 pub use tls::{pinned_certificate, pinned_certificate_from_file};
+mod history;
+pub use history::{RemoteContact, CONTACT_ID_TAG, LOGBOOK_ID_TAG, SOURCE_TAG};
 
 const RESPONSE_LIMIT: u64 = 1024 * 1024;
 
@@ -293,13 +295,23 @@ impl Longwave {
         path: &str,
         contact: Option<&Contact>,
     ) -> Result<T, Failure> {
+        let url = self.base.join(path).map_err(|_| Failure::Configuration)?;
+        self.request_url(method, url, contact, RESPONSE_LIMIT)
+    }
+
+    fn request_url<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        url: Url,
+        contact: Option<&Contact>,
+        response_limit: u64,
+    ) -> Result<T, Failure> {
         let posting = contact.is_some();
         let uncertain = if posting {
             Failure::UnconfirmedUpload
         } else {
             Failure::Unreachable
         };
-        let url = self.base.join(path).map_err(|_| Failure::Configuration)?;
         let mut request = self.client.request(method, url);
         if let Some(contact) = contact {
             request = request.json(contact);
@@ -331,17 +343,23 @@ impl Longwave {
         } else {
             Failure::InvalidResponse
         };
-        read_json(response).map_err(|_| invalid)
+        read_json(response, response_limit).map_err(|_| invalid)
     }
 }
 
-fn read_json<T: DeserializeOwned>(response: Response) -> Result<T, ()> {
+fn read_json<T: DeserializeOwned>(response: Response, limit: u64) -> Result<T, ()> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit)
+    {
+        return Err(());
+    }
     let mut body = Vec::new();
     response
-        .take(RESPONSE_LIMIT + 1)
+        .take(limit + 1)
         .read_to_end(&mut body)
         .map_err(|_| ())?;
-    if body.len() as u64 > RESPONSE_LIMIT {
+    if body.len() as u64 > limit {
         return Err(());
     }
     serde_json::from_slice(&body).map_err(|_| ())

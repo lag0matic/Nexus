@@ -84,7 +84,7 @@ impl Server {
 }
 
 // Generated per test, not a stored credential or a copy of a real operator key.
-fn token() -> String {
+pub(super) fn token() -> String {
     format!(
         "test-{}",
         std::time::SystemTime::now()
