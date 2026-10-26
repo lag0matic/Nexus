@@ -57599,7 +57599,7 @@ mod remote_credential_reply_tests {
             (HRDLOG_KEYCHAIN_USER, "Qw2eRt56Bn8Y"),
             (WRL_KEYCHAIN_USER, "Lk9jHg07Cv4E"),
             (CLOUDLOG_KEYCHAIN_USER, CLOUDLOG_KEY),
-            (LONGWAVE_KEYCHAIN_USER, "MadeUpLongwaveTokenForTests"),
+            (LONGWAVE_KEYCHAIN_USER, "Bv6Xn2Qp9Kz4R"),
             (REPEATERBOOK_KEYCHAIN_USER, "rbuapp_Pq8oIu65Fd2A"),
             (WINLINK_KEYCHAIN_USER, "Yt6rEw34Sx1Q"),
         ])
