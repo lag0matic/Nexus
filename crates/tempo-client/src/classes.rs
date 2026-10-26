@@ -334,6 +334,8 @@ pub const CLASSES: &[(&str, Class, &str)] = &[
     ("log_qso",                        RunsAtShack, "Logs a contact at the shack."),
     ("logbook_save_choice",            RunsHere,    "This computer's own quit-time question."),
     ("longwave_logbooks",              RefusedHere, "Configure Longwave at the shack only."),
+    ("longwave_push_qso",              RunsAtShack, "A Longwave upload from the shack with its stored credential."),
+    ("longwave_sync_logbook",          RunsAtShack, "Merge the selected Longwave history into the shack's logbook."),
     ("lookup_park",                    RunsAtShack, "The shack's park list."),
     ("lookup_park_live",               RunsAtShack, "A park lookup from the shack."),
     ("lotw_sat_names",                 RunsAtShack, "The satellite names the shack's logbook accepts."),

@@ -538,7 +538,18 @@ fn bulk_as<R, T>(
     engine: &Mutex<Engine>,
     context: &str,
     origin: Option<crate::loghistory::Origin>,
+    plan_it: impl FnMut(&station::LogPlan) -> Result<(R, station::Planned), String>,
+    then: impl FnOnce(&mut Engine, R) -> T,
+) -> (Result<T, String>, Durability) {
+    bulk_as_checked(engine, context, origin, plan_it, |_| Ok(()), then)
+}
+
+fn bulk_as_checked<R, T>(
+    engine: &Mutex<Engine>,
+    context: &str,
+    origin: Option<crate::loghistory::Origin>,
     mut plan_it: impl FnMut(&station::LogPlan) -> Result<(R, station::Planned), String>,
+    mut check: impl FnMut(&Engine) -> Result<(), String>,
     then: impl FnOnce(&mut Engine, R) -> T,
 ) -> (Result<T, String>, Durability) {
     let mut then = Some(then);
@@ -552,6 +563,9 @@ fn bulk_as<R, T>(
         tests::race();
         let mut out = Some(out);
         let (made, durability) = engine_lock(engine).with_log_tickets(|e| {
+            if let Err(why) = check(e) {
+                return Some(Err(why));
+            }
             if !planned.is_empty() {
                 e.station_mut().origin = origin.clone();
                 let made = e.station_mut().commit_bulk(&plan, planned, context);
@@ -560,10 +574,10 @@ fn bulk_as<R, T>(
                 made.ok()?;
             }
             let then = then.take()?;
-            Some(then(e, out.take()?))
+            Some(Ok(then(e, out.take()?)))
         });
         if let Some(made) = made {
-            return (Ok(made), durability);
+            return (made, durability);
         }
     }
     (Err(station::LOG_BUSY.into()), Durability::default())
@@ -635,6 +649,28 @@ pub fn import_adif_in_run(
     run: &str,
 ) -> (Result<ImportCounts, String>, Durability) {
     import_adif_in(engine, text, Some(run))
+}
+
+/// An import whose source can change while its rows are planned. `check` runs
+/// under the Engine lock immediately before each commit attempt, including an
+/// empty import. It must only inspect state, never perform I/O or wait.
+pub fn import_adif_in_run_checked(
+    engine: &Mutex<Engine>,
+    text: &str,
+    run: &str,
+    check: impl FnMut(&Engine) -> Result<(), String>,
+) -> (Result<ImportCounts, String>, Durability) {
+    let (made, durability) = bulk_as_checked(
+        engine,
+        "import_adif",
+        Some(crate::loghistory::Origin::in_run(Source::Import, run)),
+        |plan| station::plan_import(plan, text),
+        check,
+        |_, counts| counts,
+    );
+    let made =
+        made.and_then(|(added, skipped, merged)| Ok((added, skipped, merged, log_len(engine)?)));
+    (made, durability)
 }
 
 /// [`import_adif_in_run`] with "Import new only": a contact the log already holds is left exactly

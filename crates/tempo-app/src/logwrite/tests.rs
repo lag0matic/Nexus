@@ -46,6 +46,51 @@ fn racing<T>(hook: impl FnMut() + 'static, f: impl FnOnce() -> T) -> T {
     out
 }
 
+#[test]
+fn a_checked_import_revalidates_its_source_after_planning_before_commit() {
+    let d = Dir::new("checked-import-source");
+    std::fs::write(d.log(), legacy_log(3)).unwrap();
+    let engine = Arc::new(Mutex::new(engine_on_store(&d)));
+    {
+        let mut e = engine_lock(&engine);
+        let mut settings = e.settings().clone();
+        settings.longwave_logbook_id = "before".into();
+        e.apply_settings(settings);
+    }
+    let other = Arc::clone(&engine);
+    let text = "<CALL:5>W1NEW<BAND:3>20m<MODE:2>CW<QSO_DATE:8>20261025<TIME_ON:6>120000<EOR>";
+    let run = crate::loghistory::new_run();
+    let (refused, _) = racing(
+        move || {
+            let mut e = engine_lock(&other);
+            let mut settings = e.settings().clone();
+            settings.longwave_logbook_id = "after".into();
+            e.apply_settings(settings);
+        },
+        || {
+            import_adif_in_run_checked(&engine, text, &run, |e| {
+                if e.settings().longwave_logbook_id != "before" {
+                    return Err("source changed".into());
+                }
+                Ok(())
+            })
+        },
+    );
+    assert_eq!(refused, Err("source changed".into()));
+    assert_eq!(engine.stored_log().len(), 3);
+    let (made, durability) = import_adif_in_run_checked(&engine, text, &run, |e| {
+        assert_eq!(e.settings().longwave_logbook_id, "after");
+        Ok(())
+    });
+    durability.wait(DURABLE_WAIT).unwrap();
+    assert_eq!(
+        made.unwrap().0,
+        1,
+        "a current source still imports normally"
+    );
+    assert_eq!(engine.stored_log().len(), 4);
+}
+
 /// A connector's stamp, as another writer on the log makes it.
 fn qrz_stamp(id: RecordId, when_unix: i64) -> LogOp {
     LogOp::Stamp {

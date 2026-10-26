@@ -95,8 +95,11 @@ mod log_history;
 mod log_queries;
 /// The Logbook's clean-up tools: duplicates and their merge, bulk edit, and the check's fixes.
 mod log_tools;
+/// Longwave history and durable, non-retrying contact uploads.
+mod longwave_log;
 /// Locally approved Longwave HTTPS certificates, scoped to an exact server origin.
 mod longwave_trust;
+use longwave_log::{longwave_push_qso, longwave_sync_logbook};
 /// Parsec presence mode's watcher thread: stop latched transmissions when the operator's Parsec
 /// session drops (off by default; started on Windows only).
 mod parsec_presence;
@@ -14421,6 +14424,13 @@ fn save_and_publish(
             // copies), so saving the raw form here would write a roster that diverges from the engine and
             // revert the active radio on the next launch. Persist eng.settings() post-merge, like every
             // light verb does.
+            if cur.longwave_url != settings.longwave_url
+                || cur.longwave_logbook_id != settings.longwave_logbook_id
+                || cur.longwave_upload != settings.longwave_upload
+                || cur.mycall != settings.mycall
+            {
+                longwave_log::configuration_changed();
+            }
             if authoritative_roster {
                 // The incoming settings REPLACE the station — see `apply_and_persist`. Keeping the
                 // live roster here would leave a factory reset with every radio it promised to erase.
@@ -27144,7 +27154,17 @@ fn credentials_status(
         let s = eng.settings();
         (s.longwave_url.clone(), s.longwave_upload)
     };
-    let (longwave_ok, longwave_fail, longwave_detail) = conn_health_of("longwave");
+    let (longwave_ok, longwave_fail, longwave_detail) = qrz_logbook_health(
+        (
+            health.longwave.last_success_unix,
+            health.longwave.last_failure_unix,
+            health
+                .longwave
+                .last_failure_detail
+                .map(upload_detail_sentence),
+        ),
+        conn_health_of("longwave"),
+    );
     // #245, defect 1: the QRZ callbook row's stamps were hard-coded `None`, so it was amber
     // forever. `qrz_lookup` now records every completed lookup — see `qrz_xml_stamp`.
     let qrz_xml = conn_health_of("qrz-xml");
@@ -27406,6 +27426,7 @@ fn set_longwave_token(token: String) -> Result<(), String> {
     if token.is_empty() {
         return Err("Enter a Longwave client token".into());
     }
+    let _change = longwave_log::credential_change();
     longwave_keychain()?
         .set_password(token)
         .map_err(|_| "Could not save the Longwave token to the system keychain".to_string())?;
@@ -27415,6 +27436,7 @@ fn set_longwave_token(token: String) -> Result<(), String> {
 
 #[tauri::command(async)]
 fn clear_longwave_token() -> Result<(), String> {
+    let _change = longwave_log::credential_change();
     clear_keychain_entry(&longwave_keychain()?)
         .map_err(|_| "Could not remove the Longwave token from the system keychain".to_string())?;
     conn_log(
@@ -27485,27 +27507,15 @@ fn longwave_stamp(class: propagation::longwave::Failure) -> ConnDetail {
     }
 }
 
+fn longwave_saved_detail() -> ConnDetail {
+    conn_detail!("")
+}
+
 fn longwave_push_qso_impl(
     dto: &LoggedQso,
     engine: &SharedEngine,
 ) -> Result<String, propagation::longwave::Failure> {
-    use propagation::longwave::Failure;
-    let (url, book, fallback_call) = {
-        let eng = engine_lock(engine);
-        let s = eng.settings();
-        (
-            s.longwave_url.clone(),
-            s.longwave_logbook_id.clone(),
-            s.mycall.clone(),
-        )
-    };
-    // Copy under the lock above; keychain and network I/O are outside it.
-    let token = longwave_keychain()
-        .map_err(|_| Failure::Configuration)?
-        .get_password()
-        .map_err(|_| Failure::Configuration)?;
-    let contact = longwave_contact(&book, &fallback_call, upload_record(dto.clone()))?;
-    longwave_trust::client(&url, &token)?.upload(&contact)
+    longwave_log::push(dto, engine)
 }
 
 /// Map the logged record, not current radio readings or mutable form fields.
@@ -40410,6 +40420,8 @@ pub(crate) fn app_commands() -> Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + 
         dxcc_entity_continents,
         cloudlog_station_info,
         longwave_logbooks,
+        longwave_push_qso,
+        longwave_sync_logbook,
         dxcc_entity_locations,
         set_frequency,
         sstv_tune,

@@ -5,6 +5,17 @@ All notable changes to Nexus (formerly Tempo) are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0-longwave.3] - 2026-10-26
+
+### Added
+- Sync the saved Longwave logbook into Nexus's existing contact history, search, map grids, statistics, Journey and worked-before queries. Sync is additive and deduplicated; it never deletes local contacts or uploads imported history again.
+- Persistent Longwave upload results in the Logbook column chooser and contact details, plus an explicit upload action in the existing detail view. Unconfirmed uploads are held for review rather than automatically retried.
+
+### Fixed
+- Save a durable upload intent before sending Longwave's non-idempotent contact request. Concurrent clicks, stale UI copies and lost responses cannot silently repeat a saved or uncertain upload.
+- Refuse incomplete or invalid remote history before changing the local log, and prevent syncing an unsaved server/logbook selection.
+- Preserve Longwave receipts through duplicate cleanup, keep upload-only changes out of edit freshness checks, and cancel a prepared upload when its destination or token changes before dispatch.
+
 ## [1.21.0-longwave.2] - 2026-10-26
 
 ### Fixed
