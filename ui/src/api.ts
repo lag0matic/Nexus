@@ -187,6 +187,7 @@ function storesACredential(cmd: string): boolean {
 declare global {
   interface Window {
     __NEXUS_TV_RPC__?: string
+    __NEXUS_OBSERVER_ACCESS__?: string
   }
 }
 
@@ -197,7 +198,10 @@ declare global {
  *  degradation they already do offline. GET only: the server accepts nothing else. */
 async function httpInvoke<T>(base: string, cmd: string, args?: Record<string, unknown>): Promise<T> {
   const qs = args === undefined ? '' : `?args=${encodeURIComponent(JSON.stringify(args))}`
-  const r = await fetch(`${base}/${cmd}${qs}`, { cache: 'no-store' })
+  const access = window.__NEXUS_OBSERVER_ACCESS__
+  const options: RequestInit = { cache: 'no-store' }
+  if (access && base === '/observer/read') options.headers = { Authorization: `Bearer ${access}` }
+  const r = await fetch(`${base}/${cmd}${qs}`, options)
   if (!r.ok) throw new Error(`${cmd}: ${r.status} ${await r.text().catch(() => '')}`)
   return (await r.json()) as T
 }
@@ -228,6 +232,12 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+export type ObserverPanelStatus = { running: boolean; address: string; port: number; links: Partial<Record<'pota' | 'conditions' | 'needed', string>> }
+export type ObserverPanelAction = { kind: 'status' | 'stop' } | { kind: 'start'; address?: string; port?: number }
+export async function observerPanelAction(action: ObserverPanelAction): Promise<ObserverPanelStatus> {
+  return invoke<ObserverPanelStatus>('observer_panel_action', { action, origin: isStreamInput() ? 'stream' : 'shack' })
+}
 
 /** The rolling connectivity log (newest first) — Settings ▸ Connections. */
 export async function getConnectionLog(): Promise<import('./types').ConnEvent[]> {

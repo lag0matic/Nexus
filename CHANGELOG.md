@@ -5,6 +5,15 @@ All notable changes to Nexus (formerly Tempo) are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0-longwave.7] - 2026-10-27
+
+### Added
+- Opt-in trusted-LAN browser panels for POTA, Conditions and Needed, shared from the existing panel headers. Multiple browsers share the laptop's station state; access links expire when sharing stops or Nexus exits. Plain HTTP is limited to a private IPv4 interface and requires an access link for panel data and tuning.
+- Browser spot selections change frequency and the exact operating mode through a dedicated receive-only action. They never arm transmit, initiate a QSO, run the tuner or emit a carrier. Busy, expired and wrong-radio requests are refused rather than queued; accepted selections retire queued transmissions and leave Enable TX off.
+
+### Changed
+- Custom Longwave builds no longer check for, download or announce stock Nexus updates.
+
 ## [1.21.0-longwave.6] - 2026-10-27
 
 ### Fixed

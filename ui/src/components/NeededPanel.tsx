@@ -36,6 +36,7 @@ import { surfaceGet, surfaceSet } from '../features/windowScope'
 import { azimuthLabel, azimuthTitle, azimuthTo } from '../grid'
 import { useEntityCentroids } from '../features/entityCentroids'
 import { fmtKmTokens, useUnits } from '../units'
+import { BrowserPanelShare } from './BrowserPanelShare'
 
 /** Defensive chip lookup — an unknown future tag renders visibly, never throws. */
 function chipFor(tag: NeedTag): { label: string; cls: string; title: string } {
@@ -555,6 +556,7 @@ export function NeededPanel({
           {hasActiveFilters ? t('needed.filter.toggle.active') : t('needed.filter.toggle.idle')}
         </button>
         {!pane && onPoint && <RotatorWidget />}
+        {!pane && <BrowserPanelShare panel="needed" />}
         {onPopOut && (
           <button
             type="button"

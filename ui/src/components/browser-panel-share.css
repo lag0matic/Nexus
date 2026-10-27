@@ -1,0 +1,11 @@
+.browser-share-trigger { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 30px; width: 30px; height: 30px; padding: 0; border: 0; background: transparent; color: var(--text-dim); }
+.browser-share-trigger:hover { color: var(--text); background: var(--bg-elev); }
+.browser-share-fields { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 12px; }
+.browser-share-fields label, .browser-share-link { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.browser-share-fields input { width: 100%; min-width: 0; padding: 8px; }
+.browser-share-warning { color: var(--text-dim); font-size: 12px; margin: 12px 0; }
+.browser-share-link > span { display: flex; gap: 8px; }
+.browser-share-link input { min-width: 0; flex: 1 1 0; padding: 8px; }
+.browser-share-link button { display: inline-flex; align-items: center; justify-content: center; width: 36px; flex: 0 0 36px; }
+.browser-share-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.browser-share-actions button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; }

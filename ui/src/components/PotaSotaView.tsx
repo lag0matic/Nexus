@@ -48,6 +48,7 @@ import { POTA_SPOTS, SOTA_SPOTS, refreshFeed, useFeed, useFeedAsking } from '../
 import { t } from '../i18n'
 import { T } from '../i18n/T'
 import { upperTyped } from '../typedInput'
+import { BrowserPanelShare } from './BrowserPanelShare'
 
 type Program = 'POTA' | 'SOTA' | 'Both'
 
@@ -678,6 +679,7 @@ export function PotaSotaView({ snap, onHunt, onSnap, detached = false, observati
     <section className="panel pota-view pota-hunter" data-ota-box={pane ? '' : undefined}>
       {!pane && <div className="panel-header">
         <h2>{OTA_TITLE}</h2>
+        {!observed && <BrowserPanelShare panel="pota" />}
         <span className="awards-sub">{t('ota.subtitle')}</span>
         {/* Multi-monitor tear-off — the pop-out the per-surface filter records were
             built for: a POTA board beside a SOTA board, each keeping its own

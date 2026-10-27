@@ -127,6 +127,7 @@ mod kept_files_tests;
 #[cfg(test)]
 mod live_level_tests;
 mod mode_entry;
+mod observer;
 /// A program outside Nexus judged across the whole audio passband it could send.
 #[cfg(test)]
 mod outside_key_passband_tests;

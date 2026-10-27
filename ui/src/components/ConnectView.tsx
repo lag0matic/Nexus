@@ -29,6 +29,7 @@ const Globe3D = lazy(() => import('./Globe3D'))
 import { PaneFrame } from './connect/PaneFrame'
 import { UtcClock } from './UtcClock'
 import { DashboardBar } from './DashboardBar'
+import { BrowserPanelShare } from './BrowserPanelShare'
 import { resolveSelection, usePaneContext } from './connect/usePaneContext'
 import { paneById } from './connect/panes'
 import { RailSplitHandle, RailWidthHandle, useRailWidths } from './connect/RailHandles'
@@ -821,6 +822,7 @@ export function ConnectView({
               lead={picker}
             />
           </div>
+          <BrowserPanelShare panel="conditions" />
           {onPopOut && (
             <button
               type="button"

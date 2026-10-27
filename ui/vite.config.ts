@@ -119,6 +119,7 @@ export default defineConfig({
         main: 'index.html',
         tv: 'connect-tv.html',
         lan: 'lan.html',
+        observer: 'observer.html',
       },
     },
   },

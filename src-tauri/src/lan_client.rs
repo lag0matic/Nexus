@@ -116,7 +116,7 @@ pub(crate) use tempo_client::audio_road;
 pub(crate) use tempo_client::link;
 /// The internet road: adding it to a paired station, and opening it again.
 pub(crate) mod internet;
-mod origin;
+pub(crate) mod origin;
 pub(crate) mod pairing;
 /// The road to a paired station (the client core's).
 pub(crate) use tempo_client::road;

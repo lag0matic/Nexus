@@ -99,6 +99,7 @@ mod log_tools;
 mod longwave_log;
 /// Locally approved Longwave HTTPS certificates, scoped to an exact server origin.
 mod longwave_trust;
+mod observer_web;
 use longwave_log::{longwave_push_qso, longwave_sync_logbook};
 /// Parsec presence mode's watcher thread: stop latched transmissions when the operator's Parsec
 /// session drops (off by default; started on Windows only).
@@ -33070,6 +33071,71 @@ fn tv_rpc(cmd: &str, args: &str) -> tempo_app::connect_web::RpcOutcome {
     })
 }
 
+/// Observer reads have their own hand-written dispatch. Never expose settings,
+/// snapshots, credentials or a generic command bridge to the browser panels.
+fn observer_read(cmd: &str, args: &str) -> Result<serde_json::Value, String> {
+    let app = TV_APP.get().ok_or("Still starting up")?;
+    let args: serde_json::Value = serde_json::from_str(args).map_err(|_| "Invalid arguments")?;
+    if tempo_app::connect_web::RPC_ALLOWLIST.contains(&cmd) {
+        return match tv_rpc(cmd, &args.to_string()) {
+            tempo_app::connect_web::RpcOutcome::Ok(body) => {
+                serde_json::from_str(&body).map_err(|e| e.to_string())
+            }
+            tempo_app::connect_web::RpcOutcome::Err(why) => Err(why),
+            _ => Err("Operation not allowed".into()),
+        };
+    }
+    tauri::async_runtime::block_on(async {
+        match cmd {
+            "get_ota_spots" => {
+                let program = args
+                    .get("program")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("POTA");
+                if program != "POTA" && program != "SOTA" {
+                    return Err("Unknown programme".into());
+                }
+                serde_json::to_value(
+                    get_ota_spots(
+                        program.into(),
+                        None,
+                        app.state(),
+                        app.state(),
+                        app.state(),
+                        app.state(),
+                    )
+                    .await?,
+                )
+                .map_err(|e| e.to_string())
+            }
+            "get_need_alerts" => serde_json::to_value(
+                get_need_alerts(
+                    app.state(),
+                    app.state(),
+                    app.state(),
+                    app.state(),
+                    app.state(),
+                    app.state(),
+                )
+                .await?,
+            )
+            .map_err(|e| e.to_string()),
+            "get_band_plan" => {
+                serde_json::to_value(get_band_plan(app.state())?).map_err(|e| e.to_string())
+            }
+            _ => Err("Operation not allowed".into()),
+        }
+    })
+}
+
+#[tauri::command]
+async fn observer_panel_action(
+    origin: remote_service::Origin,
+    action: observer_web::Action,
+) -> Result<observer_web::Status, String> {
+    observer_web::action(origin, action).await
+}
+
 /// What the Settings row shows for the Connect web page: running?, the port, the URL
 /// to type into the TV, and the last bind error if it is not running.
 #[derive(Clone, serde::Serialize)]
@@ -36833,6 +36899,9 @@ async fn check_beta_update(
     app: tauri::AppHandle,
     state: tauri::State<'_, BetaUpdateState>,
 ) -> Result<Option<BetaUpdateInfo>, String> {
+    if custom_longwave_build() {
+        return Ok(None);
+    }
     let body = tauri::async_runtime::spawn_blocking(|| fetch_text(GITHUB_RELEASES_URL))
         .await
         .map_err(|e| e.to_string())??;
@@ -36948,7 +37017,7 @@ struct UpdateRoute {
 #[tauri::command]
 fn update_route() -> UpdateRoute {
     let bundle = tauri::utils::platform::bundle_type();
-    let self_update = self_updates(bundle.as_ref());
+    let self_update = !custom_longwave_build() && self_updates(bundle.as_ref());
     tempo_core::applog::info(
         "updater",
         &format!(
@@ -36964,6 +37033,30 @@ fn update_route() -> UpdateRoute {
     UpdateRoute {
         self_update,
         download_page: DOWNLOAD_PAGE_URL.to_string(),
+    }
+}
+
+/// Stock installers would remove the custom integrations. No stock update
+/// checks, downloads or startup notices in a Longwave prerelease.
+fn custom_longwave_build() -> bool {
+    custom_longwave_version(env!("CARGO_PKG_VERSION"))
+}
+
+fn custom_longwave_version(version: &str) -> bool {
+    version.contains("-longwave.")
+}
+
+#[cfg(test)]
+mod custom_update_tests {
+    #[test]
+    fn custom_longwave_versions_do_not_follow_the_stock_update_channel() {
+        for version in ["1.21.0-longwave.7", "1.22.0-longwave.1"] {
+            assert!(super::custom_longwave_version(version));
+        }
+        for version in ["1.21.0", "1.22.0-beta1"] {
+            assert!(!super::custom_longwave_version(version));
+        }
+        assert!(super::custom_longwave_build());
     }
 }
 
@@ -37010,6 +37103,14 @@ fn fetch_latest_version() -> Result<Option<String>, String> {
 /// offline or on a fetch error — the frontend treats that as a silent no-op (offline honesty).
 #[tauri::command]
 async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    if custom_longwave_build() {
+        return Ok(UpdateInfo {
+            current: app.package_info().version.to_string(),
+            latest: None,
+            update_available: false,
+            download_url: String::new(),
+        });
+    }
     let latest = tauri::async_runtime::spawn_blocking(fetch_latest_version)
         .await
         .map_err(|e| e.to_string())??;
@@ -40722,6 +40823,7 @@ pub(crate) fn app_commands() -> Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + 
         get_kp_forecast,
         get_solar_indices,
         connect_web_status,
+        observer_panel_action,
         search_parks,
         parks_count,
         hunted_parks_count,

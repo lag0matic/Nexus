@@ -348,6 +348,7 @@ pub const CLASSES: &[(&str, Class, &str)] = &[
     ("n3fjp_test_connection",          RunsAtShack, "The N3FJP Test, from the shack; takes no credential."),
     ("note_activation_exported",       RunsAtShack, "Records at the shack that one activation's file was saved; changes no contact."),
     ("notify_erase",                   RunsAtShack, "Tells the shack's companion apps a pane was cleared."),
+    ("observer_panel_action",          RefusedHere, "LAN second-monitor sharing is enabled and revoked only at the laptop."),
     ("open_download_page",             RunsHere,    "Opens a web page in this computer's browser."),
     ("open_dxped_page",                RunsHere,    "Opens an http or https page in this computer's browser."),
     ("open_external_url",              RunsHere,    "Opens an http or https page in this computer's browser."),
