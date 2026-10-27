@@ -58,3 +58,7 @@ required-features = ["live"]
 [[example]]
 name = "longwave_tls_probe"
 required-features = ["longwave"]
+
+[[example]]
+name = "longwave_history_check"
+required-features = ["longwave"]

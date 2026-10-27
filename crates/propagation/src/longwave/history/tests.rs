@@ -111,6 +111,71 @@ fn selected_saved_log_returns_every_record_and_empty_is_valid() {
 }
 
 #[test]
+fn iso_calendar_dates_and_colon_times_join_compact_contacts_in_one_snapshot() {
+    let mut rows = vec![remote()];
+    for (i, time) in ["14:03:01", "14:04:00", "14:06:06", "14:07"]
+        .into_iter()
+        .enumerate()
+    {
+        let mut row = remote();
+        row["id"] = json!(format!("iso-{i}"));
+        row["qso_date"] = json!("2026-04-17");
+        row["time_on"] = json!(time);
+        row["qrz_upload_date"] = json!("2026-04-18");
+        rows.push(row);
+    }
+    let contacts =
+        read(&json!(rows).to_string(), 5).expect("both server date/time spellings are valid");
+    for (contact, expected) in contacts[1..]
+        .iter()
+        .zip(["140301", "140400", "140606", "1407"])
+    {
+        let fields = fields(&contact.adif_record().unwrap());
+        let get = |tag| {
+            fields
+                .iter()
+                .find(|(k, _)| k == tag)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(get("QSO_DATE"), Some("20260417"));
+        assert_eq!(get("TIME_ON"), Some(expected));
+        assert_eq!(get("QRZCOM_QSO_UPLOAD_DATE"), Some("20260418"));
+        assert_eq!(
+            contact.qso_date, "2026-04-17",
+            "the received source is not rewritten"
+        );
+    }
+}
+
+#[test]
+fn separated_dates_and_times_still_reject_invalid_or_ambiguous_values() {
+    for (key, value) in [
+        ("qso_date", "2026-02-29"),
+        ("qso_date", "2026-04-31"),
+        ("qso_date", "04/17/2026"),
+        ("qso_date", "2026-4-17"),
+        ("qso_date", "2026-04-17T14:03:01Z"),
+        ("qso_date", "é026-04-1"),
+        ("time_on", "24:03:01"),
+        ("time_on", "14:60:01"),
+        ("time_on", "14:03:60"),
+        ("time_on", "14:03:01Z"),
+        ("time_on", "14:03+01:00"),
+        ("time_on", "1:03:01"),
+        ("time_on", "é4:03:0"),
+    ] {
+        let mut row = remote();
+        row[key] = json!(value);
+        let contact: RemoteContact = serde_json::from_value(row).unwrap();
+        assert_eq!(
+            contact.adif_record(),
+            Err(Failure::InvalidResponse),
+            "invalid {key}"
+        );
+    }
+}
+
+#[test]
 fn query_encodes_selected_id_without_path_or_parameter_injection() {
     let id = "book /?&=#%+unicode-\u{e9}";
     let mut row = remote();

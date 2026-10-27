@@ -5,6 +5,12 @@ All notable changes to Nexus (formerly Tempo) are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0-longwave.4] - 2026-10-26
+
+### Fixed
+- Longwave history accepts valid YYYY-MM-DD dates and HH:MM / HH:MM:SS times alongside compact ADIF values. It validates and emits canonical ADIF fields without changing the server's records, inventing timestamps or accepting invalid dates and time zones.
+- An offline history-response checker reports conversion counts without credentials, network access or contact details.
+
 ## [1.21.0-longwave.3] - 2026-10-26
 
 ### Added

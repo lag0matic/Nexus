@@ -5488,7 +5488,7 @@ dependencies = [
 
 [[package]]
 name = "tempo"
-version = "1.21.0-longwave.3"
+version = "1.21.0-longwave.4"
 dependencies = [
  "futures-util",
  "gdk",

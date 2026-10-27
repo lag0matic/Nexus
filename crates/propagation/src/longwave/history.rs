@@ -108,6 +108,14 @@ impl RemoteContact {
     /// These are remote IDs, NOT APP_NEXUS_ID. The durable importer owns local
     /// identity, additive merge policy, and the Longwave accepted-upload stamp.
     pub fn adif_record(&self) -> Result<String, Failure> {
+        let date = compact_date(&self.qso_date)?;
+        let time = compact_time(&self.time_on)?;
+        let qrz_date = self
+            .qrz_upload_date
+            .as_deref()
+            .filter(|v| !v.is_empty())
+            .map(compact_date)
+            .transpose()?;
         if [
             &self.id,
             &self.logbook_id,
@@ -120,8 +128,6 @@ impl RemoteContact {
         ]
         .iter()
         .any(|value| value.trim().is_empty())
-            || !valid_date(&self.qso_date)
-            || !valid_time(&self.time_on)
             || !self.frequency_khz.is_finite()
             || self.frequency_khz <= 0.0
             || self
@@ -130,10 +136,6 @@ impl RemoteContact {
             || self
                 .lon
                 .is_some_and(|v| !v.is_finite() || !(-180.0..=180.0).contains(&v))
-            || self
-                .qrz_upload_date
-                .as_deref()
-                .is_some_and(|v| !v.is_empty() && !valid_date(v))
         {
             return Err(Failure::InvalidResponse);
         }
@@ -142,8 +144,8 @@ impl RemoteContact {
             ("CALL", self.station_callsign.as_str()),
             ("OPERATOR", &self.operator_callsign),
             ("STATION_CALLSIGN", &self.operator_callsign),
-            ("QSO_DATE", &self.qso_date),
-            ("TIME_ON", &self.time_on),
+            ("QSO_DATE", &date),
+            ("TIME_ON", &time),
             ("BAND", &self.band),
             ("MODE", &self.mode),
             ("FREQ", &(self.frequency_khz / 1000.0).to_string()),
@@ -169,7 +171,7 @@ impl RemoteContact {
             ("POTA_REF", &self.park_reference),
             ("SIG_INFO", &self.park_reference),
             ("QRZCOM_QSO_UPLOAD_STATUS", &self.qrz_upload_status),
-            ("QRZCOM_QSO_UPLOAD_DATE", &self.qrz_upload_date),
+            ("QRZCOM_QSO_UPLOAD_DATE", &qrz_date),
             ("APP_NEXUS_LONGWAVE_SOURCE_SPOT_ID", &self.source_spot_id),
         ] {
             if let Some(value) = value {
@@ -233,6 +235,39 @@ fn valid_date(value: &str) -> bool {
         31,
     ];
     year >= 1970 && day > 0 && days.get(month).is_some_and(|max| day <= *max)
+}
+
+// Longwave can retain dates/times from imported logs verbatim, including ISO
+// separators. Accept only these unambiguous UTC field spellings, then validate
+// the calendar/clock before emitting ADIF. Never discard arbitrary punctuation.
+fn compact_date(value: &str) -> Result<String, Failure> {
+    let bytes = value.as_bytes();
+    let compact = if value.is_ascii() && bytes.len() == 10 && bytes[4] == b'-' && bytes[7] == b'-' {
+        format!("{}{}{}", &value[..4], &value[5..7], &value[8..])
+    } else {
+        value.to_owned()
+    };
+    if valid_date(&compact) {
+        Ok(compact)
+    } else {
+        Err(Failure::InvalidResponse)
+    }
+}
+
+fn compact_time(value: &str) -> Result<String, Failure> {
+    let bytes = value.as_bytes();
+    let compact = if value.is_ascii() && bytes.len() == 5 && bytes[2] == b':' {
+        format!("{}{}", &value[..2], &value[3..])
+    } else if value.is_ascii() && bytes.len() == 8 && bytes[2] == b':' && bytes[5] == b':' {
+        format!("{}{}{}", &value[..2], &value[3..5], &value[6..])
+    } else {
+        value.to_owned()
+    };
+    if valid_time(&compact) {
+        Ok(compact)
+    } else {
+        Err(Failure::InvalidResponse)
+    }
 }
 
 fn valid_time(value: &str) -> bool {
