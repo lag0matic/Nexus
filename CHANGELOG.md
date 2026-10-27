@@ -5,6 +5,11 @@ All notable changes to Nexus (formerly Tempo) are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0-longwave.6] - 2026-10-27
+
+### Fixed
+- IC-7300 Tune follows live tuner in-line/bypass readback instead of keeping its connection-time state. Turning the tuner off no longer leaves the button green or prevents switching it back on. Front-panel and ATU changes are read back too; unsupported radios retain one-time capability discovery.
+
 ## [1.21.0-longwave.5] - 2026-10-27
 
 ### Added

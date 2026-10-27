@@ -1036,6 +1036,7 @@ enum HeavyRead {
     Smeter,
     Mode,
     Split,
+    Tuner,
     Vfo,
     Func,
 }
@@ -4386,12 +4387,10 @@ struct RadioLoop {
     /// Whose turn it is on the heavy poll's read budget — see [`ReadTurns`].
     read_turns: ReadTurns,
     /// Whether the rig's BUILT-IN ATU (Hamlib `TUNER`) has been probed for the current CAT
-    /// confirmation. Probed ONCE per confirmation like [`Self::rx_ranges`] rather than round-robin
-    /// like the DSP funcs — it is a capability the cockpit shows or hides a TRANSMIT control on,
-    /// not a value that moves under the operator's hand — so a rig with no tuner costs one
-    /// round-trip per confirmation, not one per poll. The answer itself lives on the engine
-    /// (`Engine::rig_tuner`), which is what the gate and the snapshot both read.
+    /// confirmation. Discovery costs one round-trip even on unsupported radios. A supported
+    /// IC-7300 also refreshes the in-line/bypass state through the heavy poll's read budget.
     tuner_probed: bool,
+    tuner_readable: bool,
     /// Where every spectrum source publishes. Held here so the CI-V native row can be published
     /// WITHOUT the engine mutex — that mutex is held across this loop's own blocking CAT at the
     /// slot boundary, which is what starved the panadapter along with the audio row.
@@ -4737,6 +4736,7 @@ impl RadioLoop {
             func_read_next: 0,
             read_turns: ReadTurns::default(),
             tuner_probed: false,
+            tuner_readable: false,
             spectrum_feed: cfg.spectrum_feed.clone(),
             rx_tap: cfg.rx_tap.clone(),
             meter_feed: cfg.meter_feed.clone(),
@@ -9137,13 +9137,9 @@ impl RadioLoop {
                                 );
                             }
                         }
-                        // Does this radio have a built-in ATU? ONE round-trip per CAT
-                        // confirmation, like the range table above and deliberately NOT the
-                        // round-robin the DSP funcs use: this is a capability the cockpit shows
-                        // or hides a TRANSMIT control on, not a value that moves under the
-                        // operator's hand. A rig that doesn't answer `u TUNER` stays `None` and
-                        // is offered no ATU button — an ATU control on a radio with no ATU is
-                        // worse than no control.
+                        // Discover the built-in ATU once per CAT confirmation. Unsupported
+                        // radios cost only one query; supported IC-7300 connections also get
+                        // budgeted live readback below, since Tune switches in-line/bypass.
                         //
                         // The native IC-7300 daemon reads TUNER through 1C 01. Its tune-start
                         // operation and Hamlib's use G TUNE, independently of this on/off read.
@@ -9160,6 +9156,7 @@ impl RadioLoop {
                         if !self.tuner_probed {
                             self.tuner_probed = true;
                             let tuner = rig.read_func("TUNER");
+                            self.tuner_readable = tuner.is_some() && self.applied.rig_model == 3073;
                             // Nexus's own Flex client, once it runs the radio's ATU, says itself
                             // whether it can start the radio's tuner (a tuner the radio reports
                             // fitted): the profile's Hamlib model, 2036 for SmartSDR CAT,
@@ -9865,11 +9862,22 @@ impl RadioLoop {
                         if let Some(on) = tuner_switch
                             .filter(|_| self.applied.rig_model == 3073 && self.may_key())
                         {
+                            self.read_turns.owe_now(HeavyRead::Tuner);
                             if rig.set_func("TUNER", on).is_err() {
                                 engine_lock(engine).set_cat_status(
                                     self.cat_ok,
                                     "The radio did not accept the tuner switch".into(),
                                 );
+                            }
+                        }
+                        if self.tuner_readable {
+                            self.read_turns.owe(HeavyRead::Tuner);
+                            if self.read_turns.take_owed(HeavyRead::Tuner, have_budget()) {
+                                if let Some(on) = rig.read_func("TUNER") {
+                                    // Never guess from the write acknowledgement. Keep the last
+                                    // observed state on a missed read; CAT loss clears it below.
+                                    engine_lock(engine).observe_rig_tuner(Some(on), true);
+                                }
                             }
                         }
                         // ⚠️ THE ATU TUNE-UP — THIS KEYS THE TRANSMITTER. The radio puts its own
@@ -34210,6 +34218,14 @@ mod tests {
         dial_hz: u64,
         tune_reply: &'static str,
     ) -> (String, Arc<Mutex<Vec<String>>>) {
+        mock_rigctld_with_tuner_state(dial_hz, tune_reply, None)
+    }
+
+    fn mock_rigctld_with_tuner_state(
+        dial_hz: u64,
+        tune_reply: &'static str,
+        tuner: Option<Arc<Mutex<Option<bool>>>>,
+    ) -> (String, Arc<Mutex<Vec<String>>>) {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = format!("127.0.0.1:{}", listener.local_addr().unwrap().port());
@@ -34235,8 +34251,20 @@ mod tests {
                     let reply = if l == "f" {
                         dial.as_str()
                     } else if l == "u TUNER" {
-                        "1\n"
+                        match tuner.as_ref().map(|t| *t.lock().unwrap()) {
+                            Some(Some(false)) => "0\n",
+                            Some(None) => "RPRT -1\n",
+                            _ => "1\n",
+                        }
+                    } else if l == "U TUNER 0" || l == "U TUNER 1" {
+                        if let Some(tuner) = &tuner {
+                            *tuner.lock().unwrap() = Some(l.ends_with('1'));
+                        }
+                        "RPRT 0\n"
                     } else if l == "U TUNER 2" || l == "G TUNE" {
+                        if let Some(tuner) = &tuner {
+                            *tuner.lock().unwrap() = Some(true);
+                        }
                         tune_reply
                     } else {
                         "RPRT 0\n"
@@ -34304,6 +34332,77 @@ mod tests {
                     &mut station,
                 )
                 .unwrap();
+        }
+    }
+
+    #[test]
+    fn ic7300_tuner_switch_readback_tracks_both_directions_and_front_panel() {
+        let engine = atu_engine();
+        {
+            let mut e = engine.lock().unwrap();
+            let mut settings = e.settings().clone();
+            settings.rig_model = 3073;
+            e.apply_settings(settings);
+        }
+        let tuner = Arc::new(Mutex::new(Some(true)));
+        let (addr, log) =
+            mock_rigctld_with_tuner_state(14_290_000, "RPRT 0\n", Some(tuner.clone()));
+        let mut rig = Rig::rigctld(&addr);
+        let mut backend = MockBackend::new();
+        let mut state = loop_state_for(&engine);
+        state.remote_radio_id = Some(engine.lock().unwrap().settings().active_radio);
+        run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 3);
+        assert_eq!(engine.lock().unwrap().snapshot().radio.atu, Some(true));
+
+        for on in [false, true, false] {
+            engine.lock().unwrap().set_tuner(on).unwrap();
+            run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 4);
+            assert_eq!(*tuner.lock().unwrap(), Some(on), "actual radio state");
+            assert_eq!(engine.lock().unwrap().snapshot().radio.atu, Some(on));
+        }
+        engine.lock().unwrap().atu_tune().unwrap();
+        run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 4);
+        assert_eq!(*tuner.lock().unwrap(), Some(true));
+        assert_eq!(engine.lock().unwrap().snapshot().radio.atu, Some(true));
+        // A physical switch changes state without a Nexus command.
+        *tuner.lock().unwrap() = Some(false);
+        run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 4);
+        assert_eq!(engine.lock().unwrap().snapshot().radio.atu, Some(false));
+        *tuner.lock().unwrap() = Some(true);
+        run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 4);
+        assert_eq!(engine.lock().unwrap().snapshot().radio.atu, Some(true));
+        *tuner.lock().unwrap() = None;
+        run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 1);
+        assert_eq!(engine.lock().unwrap().snapshot().radio.atu, Some(true));
+        *tuner.lock().unwrap() = Some(false);
+        run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 4);
+        assert_eq!(engine.lock().unwrap().snapshot().radio.atu, Some(false));
+        let sent = log.lock().unwrap().clone();
+        let writes: Vec<_> = sent.iter().filter(|l| l.starts_with("U TUNER")).collect();
+        assert_eq!(writes, ["U TUNER 0", "U TUNER 1", "U TUNER 0"]);
+        assert_eq!(sent.iter().filter(|l| *l == "G TUNE").count(), 1);
+        assert!(!sent.iter().any(|l| l == "T 1"));
+    }
+
+    #[test]
+    fn tuner_live_reads_do_not_reprobe_unsupported_radios_or_change_other_models() {
+        for (model, initial) in [(3073, None), (1042, Some(true))] {
+            let engine = atu_engine();
+            {
+                let mut e = engine.lock().unwrap();
+                let mut settings = e.settings().clone();
+                settings.rig_model = model;
+                e.apply_settings(settings);
+            }
+            let tuner = Arc::new(Mutex::new(initial));
+            let (addr, log) = mock_rigctld_with_tuner_state(14_290_000, "RPRT 0\n", Some(tuner));
+            let mut rig = Rig::rigctld(&addr);
+            let mut backend = MockBackend::new();
+            let mut state = loop_state_for(&engine);
+            run_heavy_polls(&engine, &mut state, &mut rig, &mut backend, 12);
+            assert_eq!(engine.lock().unwrap().snapshot().radio.atu, initial);
+            let sent = log.lock().unwrap().clone();
+            assert_eq!(sent.iter().filter(|l| *l == "u TUNER").count(), 1);
         }
     }
 
