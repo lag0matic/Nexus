@@ -155,14 +155,14 @@ fn separated_dates_and_times_still_reject_invalid_or_ambiguous_values() {
         ("qso_date", "04/17/2026"),
         ("qso_date", "2026-4-17"),
         ("qso_date", "2026-04-17T14:03:01Z"),
-        ("qso_date", "é026-04-1"),
+        ("qso_date", "\u{e9}026-04-1"),
         ("time_on", "24:03:01"),
         ("time_on", "14:60:01"),
         ("time_on", "14:03:60"),
         ("time_on", "14:03:01Z"),
         ("time_on", "14:03+01:00"),
         ("time_on", "1:03:01"),
-        ("time_on", "é4:03:0"),
+        ("time_on", "\u{e9}4:03:0"),
     ] {
         let mut row = remote();
         row[key] = json!(value);
