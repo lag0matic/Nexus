@@ -47,11 +47,23 @@ impl Engine {
         }
         let offset = self.soundcard_cw_pitch_offset_mhz(mhz);
         self.sideband_override = None;
-        if mode.trim().eq_ignore_ascii_case("FM") && mhz >= 29.0 {
-            self.route_intent = Some(crate::settings::RouteMode::Fm);
+        if section == "phone" {
+            self.route_intent = Some(if mode.trim().eq_ignore_ascii_case("FM") && mhz >= 29.0 {
+                crate::settings::RouteMode::Fm
+            } else {
+                crate::settings::RouteMode::Ssb
+            });
         }
         self.set_frequency(mhz - offset, band, "USB");
         self.sideband_override = match mode.trim().to_ascii_uppercase().as_str() {
+            "SSB" => Some(
+                if crate::bandplan::phone_is_lsb(mhz) {
+                    "LSB"
+                } else {
+                    "USB"
+                }
+                .into(),
+            ),
             "USB" => Some("USB".into()),
             "LSB" => Some("LSB".into()),
             "FM" => Some("FM".into()),
@@ -163,5 +175,18 @@ mod tests {
             assert!(e.poll_tx(slot).is_empty());
         }
         assert!(e.work_afar);
+    }
+
+    #[test]
+    fn observer_ssb_selection_does_not_inherit_a_previous_fm_preference() {
+        for (mhz, expected) in [(7.18, "LSB"), (14.28, "USB"), (50.16, "USB")] {
+            let mut e = connected();
+            e.settings.phone_mode = "fm".into();
+            e.set_operating_mode("phone", false);
+            let radio = e.settings().active_radio;
+            e.observer_listen(radio, mhz, "SSB").unwrap();
+            assert_eq!(e.rig_mode_effective(), expected);
+            assert!(!e.tx_enabled());
+        }
     }
 }
