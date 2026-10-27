@@ -26,6 +26,7 @@ import { SpotDialog } from './SpotDialog'
 import { TuningStrip } from './TuningStrip'
 import { CockpitHeader } from './CockpitHeader'
 import { CockpitTxStrip } from './CockpitTxStrip'
+import { Ic7300RxControls } from './Ic7300RxControls'
 import { CockpitPaneFrame } from './panes/CockpitPaneFrame'
 import { RegionColumnSeams } from './panes/RegionColumnSeams'
 import { LeftSide } from './panes/LeftSide'
@@ -2417,6 +2418,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
               </label>
             </div>
             )}
+            <Ic7300RxControls radio={snap.radio} />
             {absentLine('rx')}
           </div>
           {/* ⭐ THE SUB RECEIVER — a dual-receiver radio's second receiver, below Main's chain.

@@ -5,6 +5,15 @@ All notable changes to Nexus (formerly Tempo) are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0-longwave.5] - 2026-10-27
+
+### Added
+- IC-7300 native CI-V inner/outer PBT controls, a center-both action, and manual-notch width in the existing Phone and CW receiver controls. PBT uses the radio's raw knob scale, not unverified Hz; controls follow radio readback and are never applied on startup.
+
+### Changed
+- On the IC-7300, Tune switches the reported internal tuner in line or bypasses it instead of starting a sound-card carrier. Other radio models retain their carrier control. ATU still starts the radio's matching cycle through the existing transmit gates. Stop TX and stopping an already-running carrier remain available.
+- Tuner switches are refused while transmitting; stale requests, radio handoffs and Stop TX discard pending switches.
+
 ## [1.21.0-longwave.4] - 2026-10-26
 
 ### Fixed

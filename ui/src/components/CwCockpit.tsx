@@ -19,6 +19,7 @@ import { BandStrip } from './BandStrip'
 import { TuningStrip } from './TuningStrip'
 import { CockpitHeader } from './CockpitHeader'
 import { CockpitTxStrip } from './CockpitTxStrip'
+import { Ic7300RxControls } from './Ic7300RxControls'
 import { ZeroBeat } from './ZeroBeat'
 import { CockpitPaneFrame } from './panes/CockpitPaneFrame'
 import { RegionColumnSeams } from './panes/RegionColumnSeams'
@@ -1796,6 +1797,7 @@ export function CwCockpit({
           with the Phone cockpit; a CW op leans on AGC speed and NR depth heavily. */}
       {hasRxDspPane && (
           <div className="ph-dsp-levels" role="group" aria-label={t('cw.rxDsp.aria')}>
+            <Ic7300RxControls radio={snap.radio} />
             {snap.radio.nrLevel != null && (
               <label className="ph-dsplev" title={t('cw.rxDsp.nr.title')}>
                 <span>{NR}</span>

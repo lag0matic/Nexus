@@ -66,6 +66,16 @@ use super::scope::ScopeSweep;
 use crate::dualrx::ReceiverId;
 use crate::rigctld_server::{serve_connection, RigBackend, SetFault};
 
+/// IC-7300 Full Manual, section 19: raw knob positions, never percent or Hz.
+fn ic7300_rx_register(name: &str) -> Option<(u8, u8, u8)> {
+    match name {
+        "PBT_IN_RAW" => Some((0x14, 0x07, 255)),
+        "PBT_OUT_RAW" => Some((0x14, 0x08, 255)),
+        "NOTCH_WIDTH_RAW" => Some((0x16, 0x57, 2)),
+        _ => None,
+    }
+}
+
 /// How THIS radio lets a command name the receiver it is for — decided once, from the model,
 /// never from the bus. See the module note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -780,6 +790,20 @@ impl CivBackend {
 
     /// [`RigBackend::level`] for receiver `rx`.
     fn level_on(&self, rx: ReceiverId, name: &str) -> Option<String> {
+        if let Some((cmd, sub, max)) = ic7300_rx_register(name) {
+            if self.model != Some(IcomModel::Ic7300) || rx != ReceiverId::Main {
+                return None;
+            }
+            let reply = self
+                .read(Frame::command(self.addr, cmd, &[sub]), cmd, Some(sub))
+                .ok()?;
+            let raw = if cmd == 0x14 {
+                commands::parse_dsp_level_raw(&reply, sub)?
+            } else {
+                u16::from(*reply.data.get(1)?)
+            };
+            return (raw <= u16::from(max)).then(|| raw.to_string());
+        }
         let who = Self::level_target(rx, level_names_a_receiver(name))?;
         match name {
             "STRENGTH" => {
@@ -869,6 +893,24 @@ impl CivBackend {
 
     /// [`RigBackend::set_level`] for receiver `rx`.
     fn set_level_on(&self, rx: ReceiverId, name: &str, value: &str) -> Option<bool> {
+        if let Some((cmd, sub, max)) = ic7300_rx_register(name) {
+            if self.model != Some(IcomModel::Ic7300) || rx != ReceiverId::Main {
+                return None;
+            }
+            let Ok(raw) = value.parse::<u8>() else {
+                return Some(false);
+            };
+            if raw > max {
+                return Some(false);
+            }
+            let data = if cmd == 0x14 {
+                let [hi, lo] = commands::level_to_bcd2(u16::from(raw));
+                vec![sub, hi, lo]
+            } else {
+                vec![sub, raw]
+            };
+            return Some(self.ack(Frame::command(self.addr, cmd, &data)));
+        }
         if name == "NOTCHF_RAW" {
             if self.model != Some(IcomModel::Ic7300) || rx != ReceiverId::Main {
                 return None;
@@ -2442,6 +2484,44 @@ mod tests {
         regs.lock().unwrap().reject_tuner_start = false;
         regs.lock().unwrap().drop_tuner_start = true;
         assert_eq!(roundtrip(&mut c, &mut rd, "G TUNE\n"), "RPRT -5\n");
+    }
+
+    #[test]
+    fn ic7300_pbt_and_notch_width_use_raw_registers_and_refuse_invalid_values() {
+        let (radio, _) = FakeRadio::new(0x94);
+        let regs = radio.regs();
+        let d =
+            CivDaemon::start_with_io(Box::new(radio), 0x94, 0, 1, Some(IcomModel::Ic7300)).unwrap();
+        let (mut c, mut rd) = client(d.local_addr.port());
+        for (name, value, cmd, bytes) in [
+            ("PBT_IN_RAW", 128, 0x14, vec![0x07, 0x01, 0x28]),
+            ("PBT_OUT_RAW", 255, 0x14, vec![0x08, 0x02, 0x55]),
+            ("NOTCH_WIDTH_RAW", 2, 0x16, vec![0x57, 0x02]),
+        ] {
+            assert_eq!(
+                roundtrip(&mut c, &mut rd, &format!("L {name} {value}\n")),
+                "RPRT 0\n"
+            );
+            assert_eq!(
+                roundtrip(&mut c, &mut rd, &format!("l {name}\n")),
+                format!("{value}\n")
+            );
+            assert!(regs.lock().unwrap().log.contains(&(cmd, bytes)));
+        }
+        let before = regs.lock().unwrap().log.len();
+        for (name, value) in [
+            ("PBT_IN_RAW", "256"),
+            ("PBT_OUT_RAW", "-1"),
+            ("NOTCH_WIDTH_RAW", "3"),
+            ("PBT_IN_RAW", "0.5"),
+        ] {
+            assert_eq!(
+                roundtrip(&mut c, &mut rd, &format!("L {name} {value}\n")),
+                "RPRT -1\n"
+            );
+        }
+        assert_eq!(regs.lock().unwrap().log.len(), before);
+        assert!(!regs.lock().unwrap().log.iter().any(|(cmd, _)| *cmd == 0x1C));
     }
 
     #[test]

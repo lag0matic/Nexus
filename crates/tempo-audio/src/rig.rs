@@ -1569,6 +1569,16 @@ impl Rig {
         self.cat(&level_line("NOTCHF_RAW", &position.to_string()))
     }
 
+    pub fn set_ic7300_rx_control(&mut self, control: usize, value: u8) -> std::io::Result<()> {
+        let token = ["PBT_IN_RAW", "PBT_OUT_RAW", "NOTCH_WIDTH_RAW"]
+            .get(control)
+            .ok_or_else(|| std::io::Error::other("Unknown IC-7300 control"))?;
+        if control == 2 && value > 2 {
+            return Err(std::io::Error::other("Invalid notch width"));
+        }
+        self.cat(&level_line(token, &value.to_string()))
+    }
+
     pub fn read_freq(&mut self) -> std::io::Result<u64> {
         if self.control.is_none() {
             return Err(std::io::Error::other("not a CAT rig"));

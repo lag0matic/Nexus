@@ -1692,6 +1692,12 @@ pub struct RadioStatus {
     /// Uncalibrated manual-notch knob position, 0..255; never a frequency in Hz.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notch_position_raw: Option<u8>,
+    /// IC-7300-only observed raw controls: inner PBT, outer PBT (0..255), notch width (0..2).
+    #[serde(default)]
+    pub ic7300_rx_controls: [Option<u8>; 3],
+    /// Inline/bypass is verified for the IC-7300; unknown radios must not use a guessed command.
+    #[serde(default)]
+    pub tuner_switch_supported: bool,
     /// AF GAIN (0.0–1.0) — the rig's volume control, read back or commanded; `None` when the
     /// rig doesn't report it. ⚠️ On a station whose soundcard is fed from the rig's speaker
     /// or headphone jack this is ALSO the decoder's audio level, so zero here stops

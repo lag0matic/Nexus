@@ -7249,6 +7249,11 @@ select optgroup {
 .op-btn.monitor:not(.on) {
   color: var(--text-faint);
 }
+.op-btn.tune.on {
+  background: color-mix(in srgb, var(--rx) 18%, transparent);
+  border-color: color-mix(in srgb, var(--rx) 45%, transparent);
+  color: var(--state-good);
+}
 .op-btn.tune.keyed {
   background: var(--state-ok);
   border-color: var(--state-ok);

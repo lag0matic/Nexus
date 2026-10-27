@@ -3099,6 +3099,10 @@ export async function setNotchPosition(position: number): Promise<AppSnapshot> {
   return invoke<AppSnapshot>('set_notch_position', { position })
 }
 
+export async function setIc7300RxControl(control: 0 | 1 | 2, value: number): Promise<AppSnapshot> {
+  return invoke<AppSnapshot>('set_ic7300_rx_control', { control, value })
+}
+
 /** Set AF gain (the rig's volume) as a 0.0–1.0 fraction.
  *
  * ⚠️ On a station whose soundcard is fed from the rig's speaker or headphone jack this is
@@ -3486,6 +3490,11 @@ export async function updateRadioProfile(
 /** Key / unkey a tune carrier. Returns the fresh snapshot. */
 export async function setTune(on: boolean): Promise<AppSnapshot> {
   return invoke<AppSnapshot>('set_tune', { on })
+}
+
+/** Switch the radio's tuner in line or bypass it; never starts a matching cycle. */
+export async function setTuner(on: boolean): Promise<AppSnapshot> {
+  return invoke<AppSnapshot>('set_tuner', { on })
 }
 
 /** Run the radio's OWN built-in antenna tuner. Rejects with the reason when the rig has no ATU or

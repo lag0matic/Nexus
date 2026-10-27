@@ -45,6 +45,47 @@ try {
     await call('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 })
     await call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 })
     assert.ok(await evaluate('Number.isInteger(JSON.parse(document.documentElement.dataset.notchCommand || "{}").position)'), 'real slider click sends integer raw position')
+    for (const name of ['PBT inner', 'PBT outer', 'Notch width', 'Center both PBT controls']) {
+      const geometry = await evaluate(`(() => {
+        const e=document.querySelector('[aria-label="${name}"]');
+        if(!e) return null; e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect();
+        return {w:r.width,h:r.height,x:r.x,y:r.y,right:r.right,bottom:r.bottom,
+          hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))};
+      })()`)
+      assert.ok(geometry?.w > 0 && geometry.h > 0 && geometry.x >= 0 && geometry.right <= width && geometry.hit,
+        `${name}: ${JSON.stringify(geometry)}`)
+    }
+    await evaluate(`document.querySelector('[aria-label="PBT inner"]').focus({preventScroll:true})`)
+    await call('Input.dispatchKeyEvent', { type:'keyDown', key:'ArrowRight', code:'ArrowRight', windowsVirtualKeyCode:39 })
+    await call('Input.dispatchKeyEvent', { type:'keyUp', key:'ArrowRight', code:'ArrowRight', windowsVirtualKeyCode:39 })
+    await new Promise(r=>setTimeout(r,100))
+    assert.deepEqual(await evaluate('JSON.parse(document.documentElement.dataset.rxCommands).at(-1)'),
+      { command:'set_ic7300_rx_control', args:{control:0,value:129} })
+    await evaluate(`document.querySelector('[aria-label="Notch width"]').focus({preventScroll:true})`)
+    await call('Input.dispatchKeyEvent', { type:'keyDown', key:'ArrowDown', code:'ArrowDown', windowsVirtualKeyCode:40 })
+    await call('Input.dispatchKeyEvent', { type:'keyUp', key:'ArrowDown', code:'ArrowDown', windowsVirtualKeyCode:40 })
+    await new Promise(r=>setTimeout(r,100))
+    assert.deepEqual(await evaluate('JSON.parse(document.documentElement.dataset.rxCommands).at(-1)'),
+      { command:'set_ic7300_rx_control', args:{control:2,value:1} })
+    const clickButton = async name => {
+      const point = await evaluate(`(() => {
+        const e=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='${name}');
+        e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect();
+        return {x:r.x+r.width/2,y:r.y+r.height/2,disabled:e.disabled};
+      })()`)
+      assert.equal(point.disabled, false, `${name} is usable`)
+      await call('Input.dispatchMouseEvent', { type: 'mousePressed', x:point.x, y:point.y, button:'left',clickCount:1 })
+      await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x:point.x, y:point.y, button:'left',clickCount:1 })
+      await new Promise(r=>setTimeout(r,100))
+    }
+    await clickButton('Tune')
+    assert.equal(await evaluate('JSON.parse(document.documentElement.dataset.rxCommands).at(-1).command'), 'set_tuner')
+    assert.equal(await evaluate('JSON.parse(document.documentElement.dataset.rxCommands).at(-1).args.on'), true)
+    await clickButton('Tune')
+    assert.equal(await evaluate('JSON.parse(document.documentElement.dataset.rxCommands).at(-1).args.on'), false)
+    await clickButton('ATU')
+    assert.equal(await evaluate('JSON.parse(document.documentElement.dataset.rxCommands).at(-1).command'), 'atu_tune')
+    assert.equal(await evaluate('JSON.parse(document.documentElement.dataset.rxCommands).some(c=>c.command==="set_tune")'), false)
     const shot = await call('Page.captureScreenshot', { format: 'png' })
     await mkdir(join(ui, '..', 'target', 'ic7300-probe'), { recursive: true })
     await writeFile(join(ui, '..', 'target', 'ic7300-probe', `${width}x${height}.png`), Buffer.from(shot.data, 'base64'))

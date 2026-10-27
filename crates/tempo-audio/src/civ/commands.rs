@@ -1424,7 +1424,7 @@ pub fn smeter_db_rel_s9(raw: u16) -> f32 {
 // ---- 2-byte big-endian BCD level codec (S-meter, RF power: 0000–0255) ----
 
 /// Encode a 0–255 level as Icom's 2-byte, big-endian, 4-digit BCD (e.g. 128 → `[0x01,0x28]`).
-fn level_to_bcd2(v: u16) -> [u8; 2] {
+pub(super) fn level_to_bcd2(v: u16) -> [u8; 2] {
     let v = v.min(9999);
     let hi = (v / 100) as u8; // 0–25 (two BCD digits: thousands+hundreds)
     let lo = (v % 100) as u8; // 0–99 (tens+ones)

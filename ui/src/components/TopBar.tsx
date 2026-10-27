@@ -10,6 +10,7 @@
 // and stay in the code.
 import { useEffect, useId, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { TunerToggle } from './TunerToggle'
 import type { BandChannel, LinkState, RadioStatus, RadioSummary, Tier } from '../types'
 import { isOnAir, isRxOnly } from '../types'
 import { Menu } from './ui/Menu'
@@ -594,16 +595,8 @@ export function TopBar({
           >
             {radio.txEnabled ? 'TX On' : 'TX Off'}
           </button>
-          <button
-            type="button"
-            className={`op-btn tune${radio.tuning ? ' keyed' : ''}`}
-            aria-pressed={radio.tuning}
-            onClick={() => onSetTune(!radio.tuning)}
-            disabled={noTx}
-            title={noTx ? NO_TX_WHY : 'Key a tune carrier'}
-          >
-            Tune
-          </button>
+          <TunerToggle radio={radio} onCarrier={onSetTune} carrierDisabled={noTx}
+            carrierTitle={noTx ? NO_TX_WHY : 'Key a tune carrier'} />
           <button
             type="button"
             className="op-btn stop"

@@ -21077,6 +21077,24 @@ fn set_notch_position(state: State<'_, SharedEngine>, position: u8) -> Result<Ap
     Ok(eng.snapshot())
 }
 
+#[tauri::command(async)]
+fn set_ic7300_rx_control(
+    state: State<'_, SharedEngine>,
+    control: usize,
+    value: u8,
+) -> Result<AppSnapshot, String> {
+    let mut eng = engine_lock(&state);
+    eng.set_ic7300_rx_control(control, value)?;
+    Ok(eng.snapshot())
+}
+
+#[tauri::command(async)]
+fn set_tuner(state: State<'_, SharedEngine>, on: bool) -> Result<AppSnapshot, String> {
+    let mut eng = engine_lock(&state);
+    eng.set_tuner(on)?;
+    Ok(eng.snapshot())
+}
+
 /// Set AF GAIN as a 0.0–1.0 fraction — the rig's volume; the radio loop applies it.
 ///
 /// ⚠️ ON SOME STATIONS THIS IS ALSO THE DECODER'S AUDIO LEVEL. A soundcard fed from the rig's
@@ -40458,6 +40476,8 @@ pub(crate) fn app_commands() -> Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + 
         set_comp_level,
         set_notch_freq,
         set_notch_position,
+        set_ic7300_rx_control,
+        set_tuner,
         set_af_gain,
         set_monitor_gain,
         set_att_db,

@@ -1432,6 +1432,9 @@ export interface RadioStatus {
   notchFreqHz?: number | null
   /** Manual-notch knob position, 0..255; not calibrated in Hz. */
   notchPositionRaw?: number | null
+  /** Inner PBT, outer PBT (raw 0..255, center 128), notch width (0 wide/1 mid/2 narrow). */
+  ic7300RxControls?: [number | null, number | null, number | null]
+  tunerSwitchSupported?: boolean
   /** AF gain (the rig's volume) 0.0–1.0 — rig read-back or commanded; absent when the rig
    * doesn't report it. ⚠️ On a station whose soundcard is fed from the rig's speaker or
    * headphone jack this is ALSO the decoder's audio level, so zero here stops FT8/RTTY/PSK.

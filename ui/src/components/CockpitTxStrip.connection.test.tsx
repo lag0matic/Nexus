@@ -3,8 +3,8 @@
 // A CONNECTION THAT TRANSMITS NOTHING SAYS SO IN THE TX STRIP. The Icom network connection is
 // receive and control only in its Beta: the engine refuses every transmission on it and names the
 // connection (`radio.txRefusal`). The strip's state reads "No TX on this connection" with that
-// reason on hover, and Tune, disabled like any lockout, gives the same reason, so nothing on screen
-// blames the licence for it. The control: with no refusal the strip reads as it always has.
+// reason on hover. Tune now switches the internal tuner without a carrier; its availability
+// follows the reported tuner rather than permission to transmit. ATU retains the TX gates.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, cleanup, screen } from '@testing-library/react'
 import { CockpitTxStrip } from './CockpitTxStrip'
@@ -24,6 +24,7 @@ const radioWith = (over: Record<string, unknown> = {}) =>
     txEnabled: true,
     tuning: false,
     txAllowed: true,
+    tunerSwitchSupported: true,
     ...over,
   }) as unknown as AppSnapshot['radio']
 
@@ -36,15 +37,15 @@ describe('the TX strip on a connection that transmits nothing', () => {
     expect(state.getAttribute('title')).toBe(REFUSED)
     const tune = screen.getByRole('button', { name: 'Tune' }) as HTMLButtonElement
     expect(tune.disabled).toBe(true)
-    expect(tune.title).toBe(REFUSED)
+    expect(tune.title).toContain('has not reported a supported IC-7300 tuner')
   })
 
-  it('reads as it always has with no refusal', () => {
-    render(<CockpitTxStrip radio={radioWith()} onTune={() => {}} />)
+  it('offers the reported tuner with no refusal', () => {
+    render(<CockpitTxStrip radio={radioWith({ atu: false })} onTune={() => {}} />)
     expect(screen.queryByText('No TX on this connection')).toBeNull()
     const tune = screen.getByRole('button', { name: 'Tune' }) as HTMLButtonElement
     expect(tune.disabled).toBe(false)
-    expect(tune.title).toMatch(/steady carrier/)
+    expect(tune.title).toContain('tuner is bypassed')
   })
 
   it('still shows what the radio itself puts on the air', () => {

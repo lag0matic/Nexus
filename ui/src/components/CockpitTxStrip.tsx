@@ -3,6 +3,7 @@ import { t } from '../i18n'
 import type { RadioStatus } from '../types'
 import { isOnAir } from '../types'
 import { RadioTuneNote } from './RadioTuneNote'
+import { TunerToggle } from './TunerToggle'
 // ⚠️ THIS FILE IS **PARTIAL** ON THE i18n LIST (i18n/hardcoded-strings.test.ts), for the same
 // deferral `CockpitHeader` carried until these controls moved here: THE TX-ENABLE LATCH (and its
 // read-only rendering), TUNE, ATU AND STOP TX stay written here, labels and tooltips. One strip
@@ -19,7 +20,7 @@ export interface CockpitTxStripProps {
    *  on a computer driving a station, where entering the section arms nothing: from afar the button
    *  arms it. */
   onSetTxEnabled?: (on: boolean) => void
-  /** Tune (key a steady carrier). */
+  /** Legacy carrier stop callback; Tune now switches the internal tuner, ATU starts matching. */
   onTune?: (on: boolean) => void
   /** Run the RADIO's own built-in ATU. Rendered only when the rig reports a tuner (`radio.atu`). */
   onAtuTune?: () => void
@@ -96,18 +97,7 @@ export function CockpitTxStrip({ radio, onSetTxEnabled, onTune, onAtuTune, onSto
             {radio.txEnabled ? 'TX On' : 'TX Off'}
           </span>
         )}
-        {onTune && (
-          <button
-            type="button"
-            className={`op-btn tune${radio.tuning ? ' keyed' : ''}`}
-            aria-pressed={radio.tuning}
-            onClick={() => onTune(!radio.tuning)}
-            disabled={!radio.txAllowed}
-            title={radio.txRefusal ?? "Key a steady carrier to tune an ATU/amp (auto-stops on the tune watchdog). Click again to stop."}
-          >
-            Tune
-          </button>
-        )}
+        {onTune && <TunerToggle radio={radio} onCarrier={onTune} />}
         {/* ⭐ DISABLED, NOT HIDDEN, when this CAT path cannot START a tune (Hamlib's Icom and
             Kenwood backends clamp `set_func TUNER 2` to "tuner in line"; `icom.c:7085`): hiding it
             answers "where did my ATU go?" with nothing. It is the ACTION that is unavailable.

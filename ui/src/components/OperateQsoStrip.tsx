@@ -1,4 +1,5 @@
 import { FtStopControl } from './FtStopControl'
+import { TunerToggle } from './TunerToggle'
 // ⚠️ THIS FILE IS **PARTIAL** ON THE i18n LIST (i18n/hardcoded-strings.test.ts), and the part
 // that is deferred is deliberate: STOP TX, TUNE, ATU and the TX On/Off tooltip stay written
 // here. The first three cut or key a carrier — Stop TX and Tune are on this cockpit's
@@ -258,16 +259,8 @@ export function OperateQsoStrip({
           >
             {radio.txEnabled ? 'TX On' : 'TX Off'}
           </button>
-          <button
-            type="button"
-            className={`op-btn tune${radio.tuning ? ' keyed' : ''}`}
-            aria-pressed={radio.tuning}
-            onClick={() => onSetTune?.(!radio.tuning)}
-            disabled={noTx}
-            title={noTx ? noTxWhy : 'Key a tune carrier'}
-          >
-            Tune
-          </button>
+          <TunerToggle radio={radio} onCarrier={onSetTune} carrierDisabled={noTx}
+            carrierTitle={noTx ? noTxWhy : 'Key a tune carrier'} />
           {/* ⭐ DISABLED, NOT HIDDEN, when this CAT path cannot START a tune — see the same
               button in `CockpitHeader` for why (Hamlib's Icom and Kenwood backends clamp
               `set_func TUNER 2` to "tuner in line"; `icom.c:7085`). */}

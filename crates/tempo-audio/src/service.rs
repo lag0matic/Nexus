@@ -1022,6 +1022,9 @@ enum HeavyRead {
     MicGain,
     Comp,
     NotchF,
+    PbtInner,
+    PbtOuter,
+    NotchWidth,
     Af,
     Rf,
     Sql,
@@ -1480,10 +1483,13 @@ const LVL_MONITOR_GAIN: usize = 9;
 /// — `0` (pad off) is inside the range — so it would look healthy until first use.
 const LVL_ATT: usize = 10;
 const LVL_PREAMP: usize = 11;
+const LVL_PBT_IN: usize = 12;
+const LVL_PBT_OUT: usize = 13;
+const LVL_NOTCH_WIDTH: usize = 14;
 /// Per-level slot count, derived from the highest index above for the same reason
 /// [`N_FUNCS`] is derived — these arrays grew from 4 to 6 in the same change, and from 6 to
 /// 9 when the analog levels landed.
-const N_LEVELS: usize = LVL_PREAMP + 1;
+const N_LEVELS: usize = LVL_NOTCH_WIDTH + 1;
 /// ⚠️ AND THE DERIVATION IS HELD DOWN AT COMPILE TIME. "Highest index plus one" is only
 /// correct while the reader knows which index is highest, and the crash [`N_FUNCS`] documents
 /// came from exactly that kind of by-hand agreement: an array index is a RUNTIME bound, so a
@@ -1501,7 +1507,10 @@ const _: () = assert!(
         && LVL_SQL < N_LEVELS
         && LVL_MONITOR_GAIN < N_LEVELS
         && LVL_ATT < N_LEVELS
-        && LVL_PREAMP < N_LEVELS,
+        && LVL_PREAMP < N_LEVELS
+        && LVL_PBT_IN < N_LEVELS
+        && LVL_PBT_OUT < N_LEVELS
+        && LVL_NOTCH_WIDTH < N_LEVELS,
     "a level index is outside the derived slot count — widen N_LEVELS"
 );
 
@@ -9296,6 +9305,40 @@ impl RadioLoop {
                                 ok,
                             );
                         }
+                        if self.applied.rig_model == 3073 {
+                            for (control, slot, turn, token, max) in [
+                                (0, LVL_PBT_IN, HeavyRead::PbtInner, "PBT_IN_RAW", 255.0),
+                                (1, LVL_PBT_OUT, HeavyRead::PbtOuter, "PBT_OUT_RAW", 255.0),
+                                (
+                                    2,
+                                    LVL_NOTCH_WIDTH,
+                                    HeavyRead::NotchWidth,
+                                    "NOTCH_WIDTH_RAW",
+                                    2.0,
+                                ),
+                            ] {
+                                if self.level_supported[slot] == Some(false)
+                                    || !self.read_turns.take(turn, have_budget())
+                                {
+                                    continue;
+                                }
+                                let raw = rig.read_meter_f32(token).filter(|v| {
+                                    v.is_finite() && *v >= 0.0 && *v <= max && v.fract() == 0.0
+                                });
+                                if let Some(raw) = raw {
+                                    engine_lock(engine)
+                                        .observe_ic7300_rx_control(control, raw as u8);
+                                }
+                                note_ext_read(
+                                    &mut self.level_supported[slot],
+                                    &mut self.level_misses[slot],
+                                    raw.is_some(),
+                                );
+                                if self.level_supported[slot] == Some(false) {
+                                    engine_lock(engine).clear_ic7300_rx_control(control);
+                                }
+                            }
+                        }
                         // The three analog levels. Same capability cache as everything else
                         // here (3 consecutive misses and the loop stops asking), so a rig that
                         // reports none of them never pays a CAT timeout for the question.
@@ -9815,6 +9858,18 @@ impl RadioLoop {
                                     );
                                 }
                                 engine_lock(engine).observe_slice_write(&w, outcome);
+                            }
+                        }
+                        let tuner_switch =
+                            engine_lock(engine).take_tuner_switch(self.remote_radio_id);
+                        if let Some(on) = tuner_switch
+                            .filter(|_| self.applied.rig_model == 3073 && self.may_key())
+                        {
+                            if rig.set_func("TUNER", on).is_err() {
+                                engine_lock(engine).set_cat_status(
+                                    self.cat_ok,
+                                    "The radio did not accept the tuner switch".into(),
+                                );
                             }
                         }
                         // ⚠️ THE ATU TUNE-UP — THIS KEYS THE TRANSMITTER. The radio puts its own
@@ -12616,6 +12671,19 @@ impl RadioLoop {
                 }
             }
             // RX DSP levels: NR level (0..1) + AGC speed — applied on change like mic gain.
+            let rx_controls = engine_lock(engine).take_ic7300_rx_controls();
+            if self.applied.rig_model == 3073 {
+                for (control, value) in rx_controls.into_iter().enumerate() {
+                    if let Some(value) = value {
+                        if rig.set_ic7300_rx_control(control, value).is_err() {
+                            engine_lock(engine).set_cat_status(
+                                self.cat_ok,
+                                "The radio did not accept the PBT/notch-width setting".into(),
+                            );
+                        }
+                    }
+                }
+            }
             let (nr, agc, comp, notchf, notchraw, analog) = {
                 let mut e = engine_lock(engine);
                 (

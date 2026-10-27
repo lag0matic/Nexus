@@ -4223,6 +4223,8 @@ pub struct Engine {
     rig_notch_freq_hz: Option<f32>,
     notch_position_raw: Option<u8>,
     rig_notch_position_raw: Option<u8>,
+    rig_ic7300_rx: [Option<u8>; 3],
+    pending_ic7300_rx: [Option<u8>; 3],
     /// THE THREE ANALOG LEVELS a voice operator rides continuously, and which a digital-first
     /// history left out: AF gain, RF gain and squelch. Same desired/read-back split as every
     /// pair above — the rig's own value wins when it reports one, so a slider shows where the
@@ -4342,6 +4344,7 @@ pub struct Engine {
     /// (it doesn't need one). Running the tuner KEYS THE TRANSMITTER, so it gets its own request
     /// path behind [`Self::atu_tune_gate`] and must never become reachable from that generic one.
     rig_tuner: Option<bool>,
+    pending_tuner_switch: Option<(bool, u64, u32)>,
     /// ⭐ Whether an ATU press on THIS CAT path can actually start a tune-up, or only switch the
     /// tuner in line. `true` until the radio loop's probe says otherwise, so an unknown or
     /// unprobed radio behaves exactly as it did before this existed.
@@ -6703,6 +6706,8 @@ impl Engine {
             rig_notch_freq_hz: None,
             notch_position_raw: None,
             rig_notch_position_raw: None,
+            rig_ic7300_rx: [None; 3],
+            pending_ic7300_rx: [None; 3],
             agc: None,
             rig_agc: None,
             agc_picked: false,
@@ -6724,6 +6729,7 @@ impl Engine {
             rig_refused_dial_mhz: None,
             pending_func: [None; 7],
             rig_tuner: None,
+            pending_tuner_switch: None,
             rig_atu_start_tune: true,
             pending_atu_tune: None,
             pending_atu_tune_stand_down: 0,
@@ -8187,7 +8193,10 @@ impl Engine {
         // keeps: the radio that may be playing is the one being left, and the loop would send
         // the STOP to the incoming one.
         self.pending_atu_tune = None;
+        self.pending_tuner_switch = None;
         self.pending_voice_mem = None;
+        self.rig_ic7300_rx = [None; 3];
+        self.pending_ic7300_rx = [None; 3];
         // …and exactly like a QSY, take the queued split one-shot
         // (`set_frequency` / `observe_rig_freq` do the identical three lines).
         // A pending split was authorized against the OUTGOING radio — for the
@@ -12382,6 +12391,46 @@ impl Engine {
         }
     }
 
+    /// Queue only controls the connected IC-7300 has actually reported. Values are raw knob
+    /// positions (PBT), not calibrated Hz; notch width is the radio's 0/1/2 enumeration.
+    pub fn set_ic7300_rx_control(&mut self, control: usize, value: u8) -> Result<(), String> {
+        if self.settings.rig_model != 3073
+            || control >= 3
+            || self.rig_ic7300_rx[control].is_none()
+            || (control == 2 && value > 2)
+        {
+            return Err(
+                "This connection has not reported that IC-7300 control or the value is invalid"
+                    .into(),
+            );
+        }
+        self.remote_actuation.revoke();
+        self.pending_ic7300_rx[control] = Some(value);
+        Ok(())
+    }
+
+    pub fn observe_ic7300_rx_control(&mut self, control: usize, value: u8) {
+        if self.settings.rig_model == 3073 && control < 3 && (control != 2 || value <= 2) {
+            self.rig_ic7300_rx[control] = Some(value);
+        }
+    }
+
+    pub fn take_ic7300_rx_controls(&mut self) -> [Option<u8>; 3] {
+        let pending = std::mem::take(&mut self.pending_ic7300_rx);
+        if self.settings.rig_model == 3073 {
+            pending
+        } else {
+            [None; 3]
+        }
+    }
+
+    pub fn clear_ic7300_rx_control(&mut self, control: usize) {
+        if control < 3 {
+            self.rig_ic7300_rx[control] = None;
+            self.pending_ic7300_rx[control] = None;
+        }
+    }
+
     /// Set desired AF GAIN (0.0–1.0) — the rig's volume. The radio loop applies it.
     ///
     /// ⚠️ THIS CAN SILENCE THE DECODER. On a station whose soundcard is fed from the rig's
@@ -12836,6 +12885,8 @@ impl Engine {
         self.rig_funcs = [None; 7];
         self.notch_position_raw = None;
         self.rig_notch_position_raw = None;
+        self.rig_ic7300_rx = [None; 3];
+        self.pending_ic7300_rx = [None; 3];
     }
 
     /// Queue a func toggle from the UI (`func` = "nb"|"nr"|"notch"|"comp"|"vox"); the radio loop
@@ -12868,11 +12919,42 @@ impl Engine {
         self.rig_atu_start_tune = start_tune;
     }
 
+    fn tuner_switch_gate(&self) -> Result<(), String> {
+        if self.settings.rig_model != 3073
+            || self.rig_tuner.is_none()
+            || self.cat_status.0 != Some(true)
+        {
+            return Err("This connection has not reported a supported IC-7300 tuner".into());
+        }
+        if self.app.transmitting() || self.tuning() || self.rig_keyed || self.tx_owner().is_some() {
+            return Err("Stop transmitting before switching the tuner".into());
+        }
+        Ok(())
+    }
+
+    /// Only inline/bypass. This must never enqueue an ATU cycle or a tune carrier.
+    pub fn set_tuner(&mut self, on: bool) -> Result<(), String> {
+        self.tuner_switch_gate()?;
+        self.remote_actuation.revoke();
+        self.pending_tuner_switch = Some((on, now_unix_secs(), self.settings.active_radio));
+        Ok(())
+    }
+
+    pub fn take_tuner_switch(&mut self, connected_radio: Option<u32>) -> Option<bool> {
+        let (on, at, radio) = self.pending_tuner_switch.take()?;
+        (now_unix_secs().saturating_sub(at) <= ATU_REQUEST_MAX_AGE_SECS
+            && connected_radio == Some(radio)
+            && self.settings.active_radio == radio
+            && self.tuner_switch_gate().is_ok())
+        .then_some(on)
+    }
+
     /// Drop the tuner capability (→ the ATU control hides) on a breaker trip — the same reason as
     /// [`Self::clear_rig_funcs`]: a half-open CAT link must never leave a stale capability behind,
     /// and this one offers the operator a button that keys their transmitter.
     pub fn clear_rig_tuner(&mut self) {
         self.rig_tuner = None;
+        self.pending_tuner_switch = None;
         self.rig_atu_start_tune = true; // unknown again, and unknown means "as it always was"
     }
 
@@ -19334,6 +19416,7 @@ Pick the one you operate from on the Contesting tab in Settings.",
         // window would fire one pressed before the Stop: the rig's ATU tune-up, and a voice-memory
         // PLAY. A queued voice-memory STOP stays: it stops a transmission.
         self.pending_atu_tune = None;
+        self.pending_tuner_switch = None;
         if matches!(self.pending_voice_mem, Some(VoiceMemCmd::Play(_))) {
             self.pending_voice_mem = None;
         }
@@ -27769,6 +27852,12 @@ contact yourself."
         s.radio.notch_position_raw = (self.settings.rig_model == 3073)
             .then_some(self.rig_notch_position_raw)
             .flatten();
+        s.radio.ic7300_rx_controls = if self.settings.rig_model == 3073 {
+            self.rig_ic7300_rx
+        } else {
+            [None; 3]
+        };
+        s.radio.tuner_switch_supported = self.settings.rig_model == 3073;
         s.radio.af_gain = self.rig_af_gain.or(self.af_gain);
         s.radio.rf_gain = self.rig_rf_gain.or(self.rf_gain);
         s.radio.squelch = self.rig_squelch.or(self.squelch);
@@ -33100,6 +33189,62 @@ fn haversine_km(a: (f64, f64), b: (f64, f64)) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ic7300_rx_controls_require_readback_validate_width_and_clear_on_disconnect() {
+        let mut e = super::Engine::new("W9TST", "EN52", 0);
+        e.settings.rig_model = 3073;
+        assert!(e.set_ic7300_rx_control(0, 128).is_err());
+        for (control, value) in [(0, 128), (1, 255), (2, 2)] {
+            e.observe_ic7300_rx_control(control, value);
+            e.set_ic7300_rx_control(control, value).unwrap();
+        }
+        assert_eq!(
+            e.snapshot().radio.ic7300_rx_controls,
+            [Some(128), Some(255), Some(2)]
+        );
+        assert!(e.set_ic7300_rx_control(2, 3).is_err());
+        assert!(e.set_ic7300_rx_control(3, 0).is_err());
+        assert_eq!(e.take_ic7300_rx_controls(), [Some(128), Some(255), Some(2)]);
+        assert_eq!(e.take_ic7300_rx_controls(), [None; 3]);
+        e.set_ic7300_rx_control(0, 0).unwrap();
+        e.clear_rig_funcs();
+        assert_eq!(e.take_ic7300_rx_controls(), [None; 3]);
+        assert_eq!(e.snapshot().radio.ic7300_rx_controls, [None; 3]);
+        e.settings.rig_model = 1049;
+        e.observe_ic7300_rx_control(0, 128);
+        assert!(e.set_ic7300_rx_control(0, 128).is_err());
+    }
+
+    #[test]
+    fn tuner_switch_never_queues_a_carrier_or_cycle_and_stop_drops_it() {
+        let mut e = super::Engine::new("W9TST", "EN52", 0);
+        e.settings.rig_model = 3073;
+        let radio = Some(e.settings.active_radio);
+        assert!(e.set_tuner(true).is_err());
+        e.set_cat_status(Some(true), String::new());
+        e.observe_rig_tuner(Some(false), true);
+        e.set_tuner(true).unwrap();
+        assert!(!e.tuning());
+        assert!(e.pending_atu_tune.is_none());
+        assert_eq!(e.take_tuner_switch(radio), Some(true));
+        assert_eq!(e.take_tuner_switch(radio), None);
+        e.set_tuner(false).unwrap();
+        e.rig_keyed = true;
+        assert_eq!(e.take_tuner_switch(radio), None);
+        assert!(e.set_tuner(true).is_err());
+        e.rig_keyed = false;
+        e.set_tuner(true).unwrap();
+        e.halt_tx();
+        assert_eq!(e.take_tuner_switch(radio), None);
+        e.set_tuner(true).unwrap();
+        e.pending_tuner_switch = Some((true, 0, e.settings.active_radio));
+        assert_eq!(e.take_tuner_switch(radio), None);
+        e.set_tuner(true).unwrap();
+        assert_eq!(e.take_tuner_switch(Some(e.settings.active_radio + 1)), None);
+        e.settings.rig_model = 1049;
+        assert!(e.set_tuner(true).is_err());
+    }
+
     #[test]
     fn ic7300_raw_notch_commands_require_a_readback_and_are_one_shot() {
         let mut e = super::Engine::new("W9TST", "EN52", 0);
