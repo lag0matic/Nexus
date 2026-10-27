@@ -4,7 +4,8 @@
 use propagation::longwave::RemoteContact;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let contacts: Vec<RemoteContact> = serde_json::from_reader(std::io::stdin())?;
+    let contacts: Vec<RemoteContact> =
+        serde_json::from_reader(std::io::stdin()).map_err(|_| "Invalid Longwave contacts JSON")?;
     for (index, contact) in contacts.iter().enumerate() {
         contact
             .adif_record()
