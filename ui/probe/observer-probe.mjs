@@ -18,6 +18,13 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   try {
     if (url.pathname.startsWith('/observer/')) {
+      if (req.method === 'POST' && url.pathname === '/observer/pair') {
+        const chunks = []; for await (const chunk of req) chunks.push(chunk)
+        const body = JSON.parse(Buffer.concat(chunks).toString())
+        assert.deepEqual(Object.keys(body), ['code'])
+        if (body.code !== '12345678') { res.writeHead(403).end('Incorrect access code'); return }
+        res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ access })); return
+      }
       if (req.headers.authorization !== `Bearer ${access}`) { res.writeHead(403).end('No access'); return }
       const json = body => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(body)) }
       if (req.method === 'POST') {
@@ -42,7 +49,7 @@ const server = createServer(async (req, res) => {
       if (command in replies) { json(replies[command]); return }
       res.writeHead(403).end('Not allowed'); return
     }
-    const name = url.pathname.startsWith('/panels/') ? 'observer.html' : url.pathname.replace(/^\//, '')
+    const name = url.pathname === '/' || url.pathname.startsWith('/panels/') ? 'observer.html' : url.pathname.replace(/^\//, '')
     const file = resolve(dist, name)
     if (!file.startsWith(`${dist}/`)) { res.writeHead(404).end(); return }
     const extension = file.slice(file.lastIndexOf('.'))
@@ -81,7 +88,18 @@ try {
   for (const [width,height] of [[375,812], [768,1024], [1024,768], [1920,1080]]) {
     await call('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:width<600 })
     for (const panel of ['pota', 'needed', 'conditions']) {
-      await call('Page.navigate', { url:`http://127.0.0.1:${server.address().port}/panels/${panel}#access=${access}` })
+      await call('Page.navigate', { url:`http://127.0.0.1:${server.address().port}${panel === 'pota' ? '/' : `/panels/${panel}`}` })
+      await wait(`!!document.querySelector('#observer-code')`)
+      const entry = await evaluate(`(() => {const e=document.querySelector('#observer-code');const r=e.getBoundingClientRect();return {right:r.right,width:r.width,scroll:document.documentElement.scrollWidth}})()`)
+      assert.ok(entry.right <= width + 1 && entry.width > 200 && entry.scroll <= width + 1, JSON.stringify(entry))
+      await click('#observer-code')
+      await call('Input.insertText', { text: '87654321' })
+      await click('button[type=submit]')
+      await wait(`document.querySelector('[role=alert]')?.textContent.includes('Incorrect access code')`)
+      assert.equal(await evaluate(`!!document.querySelector('.observer-spot')`), false)
+      await evaluate(`document.querySelector('#observer-code').select()`)
+      await call('Input.insertText', { text: '1234 5678' })
+      await click('button[type=submit]')
       if (panel !== 'conditions') {
         await wait(`!!document.querySelector('.observer-spot:not(:disabled)')`)
         const layout = await evaluate(`(() => {const e=document.querySelector('.observer-spot');const r=e.getBoundingClientRect(); return {right:r.right,width:r.width,height:r.height,scroll:document.documentElement.scrollWidth,viewport:innerWidth};})()`)
@@ -102,11 +120,16 @@ try {
         assert.equal(await evaluate(`document.body.innerText.includes('Panel unavailable.')`), false)
       }
       assert.equal(await evaluate(`location.hash`), '', 'access removed from visible address')
+      assert.equal(await evaluate(`Array.from(document.querySelectorAll('.observer-header a')).some(a=>a.href.includes('access='))`), false, 'panel addresses never include credentials')
+      assert.equal(await evaluate(`Object.values(localStorage).concat(Object.values(sessionStorage)).some(v=>v.includes(${JSON.stringify(access)}))`), false, 'credentials never saved')
       const shot = await call('Page.captureScreenshot', { format:'png' })
       await writeFile(join(output, `${panel}-${width}x${height}.png`), Buffer.from(shot.data,'base64'))
       console.log(`PASS ${panel} ${width}x${height}: built assets, real layout and browser input`)
     }
   }
+  await call('Page.reload')
+  await wait(`!!document.querySelector('#observer-code')`)
+  console.log('PASS: root address, typed short code, wrong-code refusal, tab-memory access and reload re-entry')
   assert.deepEqual(faults, [], 'no browser runtime exceptions')
   console.log('PASS: only receive-only POST bodies; no transmit or arming commands')
 } finally {

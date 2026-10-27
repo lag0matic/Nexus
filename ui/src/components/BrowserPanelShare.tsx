@@ -50,13 +50,15 @@ export function BrowserPanelShare({ panel }: { panel: 'pota' | 'conditions' | 'n
       </div>
       <p className="browser-share-warning">Unencrypted access. Trusted LAN only.</p>
       {error && <p role="alert">{error}</p>}
-      {link && status?.running && <label className="browser-share-link" htmlFor={`${id}-link`}>Access link
+      {link && status?.running && <><label className="browser-share-link" htmlFor={`${id}-link`}>Browser address
         <span><input id={`${id}-link`} value={link} readOnly onFocus={(e) => e.target.select()} />
           <button type="button" title={copied ? 'Copied' : 'Copy access link'} aria-label="Copy access link" onClick={() => {
             if (!navigator.clipboard?.writeText) { setError('Clipboard unavailable; select the access link'); return }
             void navigator.clipboard.writeText(link).then(() => setCopied(true)).catch(() => setError('Clipboard unavailable; select the access link'))
           }}>{copied ? <Check size={17} /> : <Copy size={17} />}</button></span>
-      </label>}
+      </label><label className="browser-share-link" htmlFor={`${id}-code`}>Access code
+        <input id={`${id}-code`} value={status.accessCode?.replace(/(.{4})(.{4})/, '$1 $2') ?? ''} readOnly onFocus={(e) => e.target.select()} />
+      </label></>}
       <div className="browser-share-actions">
         <button type="button" disabled={busy || !status || !address || !Number.isInteger(port) || port < 1024 || port > 65535}
           onClick={() => void toggle()}><Power size={16} aria-hidden="true" /> {status?.running ? 'Stop sharing' : 'Start sharing'}</button>

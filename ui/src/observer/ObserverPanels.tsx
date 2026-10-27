@@ -103,7 +103,7 @@ export function ObserverPanels() {
     <header className="observer-header">
       <strong>Nexus</strong>
       <nav aria-label="Panels">{PANELS.map(({ id, label }) => <a key={id}
-        href={`/panels/${id}#access=${window.__NEXUS_OBSERVER_ACCESS__ ?? ''}`}
+        href={`/panels/${id}`}
         aria-current={panel === id ? 'page' : undefined}
         onClick={(e) => { if (e.ctrlKey || e.metaKey) return; e.preventDefault(); history.pushState(null, '', `/panels/${id}`); setSearch(''); setPanel(id) }}>{label}</a>)}</nav>
       <span className="observer-radio" role="status">{linked && radio ? `${radio.mhz.toFixed(4)} MHz · ${radio.mode === 'digital' ? radio.tier : radio.mode.toUpperCase()}` : 'Disconnected'}</span>

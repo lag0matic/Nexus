@@ -9,10 +9,13 @@ operating consoles. Audio, logging and all transmit controls stay on the laptop.
 1. Open POTA, Conditions or Needed in Nexus.
 2. Click the monitor/phone icon beside its pop-out control.
 3. Check the laptop's private IPv4 address and port, then choose **Start sharing**.
-4. Open the supplied access link on the other device. The panel tabs open the
-   other shared views; separate access links can be opened in multiple browsers.
+4. Type the displayed browser address on the other device, for example
+   `http://192.168.1.10:7375`, then enter the eight-digit **Access code** shown in
+   Nexus. Spaces between the two groups of four digits are optional.
+5. Use the panel tabs to switch between POTA, Conditions and Needed. For another
+   browser or tab, open the same short address and enter the code again.
 
-Sharing is off at every Nexus launch. **Stop sharing** revokes all current links,
+Sharing is off at every Nexus launch. **Stop sharing** revokes all connected tabs and the code,
 not just the panel whose sharing control is open. Closing the sharing dialog or
 switching the laptop's operating screen does not stop the server.
 
@@ -40,11 +43,13 @@ without an exact frequency is not silently sent to a band's default frequency.
 
 - This is unencrypted HTTP for a trusted LAN. A hostile network peer could
   intercept traffic. Use a private home-LAN interface, not a public or VPN one.
-- Each sharing session has a fresh random access link. Its secret is carried in
-  the URL fragment, removed from the visible address on load, and retained only
-  in that tab's memory. Reloading requires reopening the access link.
-- Do not post access links publicly. Anyone holding a current link can read the
-  shared panel data and request receive-only selections until sharing stops.
+- Each sharing session has a fresh random eight-digit code displayed only at the
+  laptop. The browser exchanges it for a strong random token held only in that
+  tab's memory, never in the address bar or browser storage. Reloading asks for
+  the code again. Five code attempts are allowed per thirty seconds across all
+  viewers; incorrect entries do not grant any panel data or tuning access.
+- Do not post access codes publicly. Anyone holding the current code can read
+  the shared panel data and request receive-only selections until sharing stops.
 - The server binds one private IPv4 address, not all interfaces. Data requests
   require the access secret; selections additionally require the matching Origin
   and Host, a fresh radio observation, strict JSON fields and an idle engine.

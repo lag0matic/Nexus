@@ -1,5 +1,5 @@
 //! Opt-in second-monitor panels on one private IPv4 interface. Trusted-LAN HTTP,
-//! not Internet remote operation. An in-memory access link authorizes panel reads
+//! not Internet remote operation. A short local code exchanges for a tab-memory token for panel reads
 //! and ONE receive-only operation. No arbitrary command dispatcher is exposed.
 //! Stopping sharing revokes every link and in-flight request; restart is always off.
 
@@ -47,6 +47,7 @@ pub(crate) struct Status {
     port: u16,
     /// Explicitly requested at the local screen only; never logged or persisted.
     links: HashMap<&'static str, String>,
+    access_code: Option<String>,
 }
 
 struct Session {
@@ -54,6 +55,9 @@ struct Session {
     address: Ipv4Addr,
     port: u16,
     access: String,
+    code: String,
+    code_tag: hmac::Tag,
+    pair_attempts: Mutex<(Instant, u8)>,
     auth_key: hmac::Key,
     auth_tag: hmac::Tag,
     active: AtomicBool,
@@ -74,10 +78,7 @@ fn status(session: Option<&Session>) -> Status {
     let mut links = HashMap::new();
     if let Some(s) = session {
         for panel in ["pota", "conditions", "needed"] {
-            links.insert(
-                panel,
-                format!("{}/panels/{panel}#access={}", s.base, s.access),
-            );
+            links.insert(panel, s.base.clone());
         }
     }
     Status {
@@ -88,6 +89,7 @@ fn status(session: Option<&Session>) -> Status {
             .unwrap_or_default(),
         port: session.map_or(PORT, |s| s.port),
         links,
+        access_code: session.map(|s| s.code.clone()),
     }
 }
 
@@ -138,12 +140,17 @@ pub(crate) async fn action(
                 let access: String = secret.iter().map(|b| format!("{b:02x}")).collect();
                 let auth_key = hmac::Key::new(hmac::HMAC_SHA256, &secret);
                 let auth_tag = hmac::sign(&auth_key, access.as_bytes());
+                let code = new_code()?;
+                let code_tag = hmac::sign(&auth_key, code.as_bytes());
                 let (stop, mut stopped) = tokio::sync::watch::channel(false);
                 let s = Arc::new(Session {
                     base: format!("http://{ip}:{port}"),
                     address: ip,
                     port,
                     access,
+                    code,
+                    code_tag,
+                    pair_attempts: Mutex::new((Instant::now(), 0)),
                     auth_key,
                     auth_tag,
                     active: AtomicBool::new(true),
@@ -180,6 +187,47 @@ pub(crate) async fn action(
     Ok(status(
         slot.as_deref().filter(|s| s.active.load(Ordering::SeqCst)),
     ))
+}
+
+fn new_code() -> Result<String, String> {
+    // Rejection sampling keeps all eight-digit codes equally likely.
+    loop {
+        let mut bytes = [0u8; 4];
+        SystemRandom::new()
+            .fill(&mut bytes)
+            .map_err(|_| "Cannot make an access code")?;
+        let value = u32::from_le_bytes(bytes);
+        if value < 4_200_000_000 {
+            return Ok(format!("{:08}", value % 100_000_000));
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Pair {
+    code: String,
+}
+
+fn pair(s: &Session, request: Pair) -> Result<Value, String> {
+    let mut attempts = s.pair_attempts.lock().map_err(|_| "Sharing unavailable")?;
+    if !s.active.load(Ordering::SeqCst) {
+        return Err("Sharing stopped".into());
+    }
+    if attempts.0.elapsed() >= Duration::from_secs(30) {
+        *attempts = (Instant::now(), 0);
+    }
+    if attempts.1 >= 5 {
+        return Err("Too many attempts; wait 30 seconds and try again".into());
+    }
+    attempts.1 += 1;
+    if request.code.len() != 8
+        || !request.code.bytes().all(|b| b.is_ascii_digit())
+        || hmac::verify(&s.auth_key, request.code.as_bytes(), s.code_tag.as_ref()).is_err()
+    {
+        return Err("Incorrect access code; check Nexus on the laptop".into());
+    }
+    Ok(json!({ "access": s.access }))
 }
 
 fn one<'a>(h: &'a Head, key: &str) -> Option<&'a str> {
@@ -253,12 +301,45 @@ async fn serve(mut stream: TcpStream, s: Arc<Session>) -> Result<(), String> {
         crate::tv_asset(path.trim_start_matches('/'))
             .map(|(body, mime)| (mime, body))
             .ok_or("Asset not found".into())
+    } else if head.method == "POST" && path == "/observer/pair" {
+        if !s.active.load(Ordering::SeqCst)
+            || one(&head, "host") != s.base.strip_prefix("http://")
+            || one(&head, "origin") != Some(s.base.as_str())
+            || one(&head, "content-type") != Some("application/json")
+            || head.headers.iter().any(|(k, _)| k == "transfer-encoding")
+        {
+            return send(&mut stream, 403, "text/plain", b"Access request refused").await;
+        }
+        let Some(length) = one(&head, "content-length")
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n > 0 && n <= MAX_BODY)
+        else {
+            return send(&mut stream, 400, "text/plain", b"Invalid body length").await;
+        };
+        while bytes.len() < end + length {
+            let mut buf = [0; MAX_BODY];
+            let n = stream.read(&mut buf).await.map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err("Incomplete body".into());
+            }
+            bytes.extend_from_slice(&buf[..n]);
+        }
+        let Ok(request) = serde_json::from_slice::<Pair>(&bytes[end..end + length]) else {
+            return send(&mut stream, 400, "text/plain", b"Invalid access request").await;
+        };
+        match pair(&s, request) {
+            Ok(value) => Ok((
+                "application/json".into(),
+                serde_json::to_vec(&value).map_err(|e| e.to_string())?,
+            )),
+            Err(why) => return send(&mut stream, 403, "text/plain", why.as_bytes()).await,
+        }
     } else if !admitted(&s, &head) {
         return send(
             &mut stream,
             403,
             "text/plain",
-            b"Open the current access link from the laptop",
+            b"Enter the current access code shown in Nexus",
         )
         .await;
     } else if head.method == "GET" && path.starts_with("/observer/read/") {
@@ -456,6 +537,9 @@ mod tests {
             address: Ipv4Addr::new(192, 168, 1, 10),
             port: PORT,
             access: "test-only-access".into(),
+            code: "12345678".into(),
+            code_tag: hmac::sign(&key, b"12345678"),
+            pair_attempts: Mutex::new((Instant::now(), 0)),
             auth_key: key,
             auth_tag: tag,
             active: AtomicBool::new(true),
@@ -483,6 +567,73 @@ mod tests {
             .unwrap();
         task.await.unwrap();
         String::from_utf8(bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn observer_short_code_exchange_requires_origin_and_never_puts_access_in_address() {
+        let s = test_session();
+        let body = r#"{"code":"12345678"}"#;
+        let request = format!("POST /observer/pair HTTP/1.1\r\nHost: 192.168.1.10:7375\r\nOrigin: http://192.168.1.10:7375\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+        let response = talk(s.clone(), &request).await;
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(response.contains(r#""access":"test-only-access""#));
+        for link in status(Some(&s)).links.values() {
+            assert_eq!(link, "http://192.168.1.10:7375");
+        }
+        assert!(talk(s.clone(), &request.replace("12345678", "87654321"))
+            .await
+            .starts_with("HTTP/1.1 403"));
+        assert!(talk(
+            s.clone(),
+            &request.replace(
+                "Origin: http://192.168.1.10:7375",
+                "Origin: http://attacker.invalid"
+            )
+        )
+        .await
+        .starts_with("HTTP/1.1 403"));
+        s.active.store(false, Ordering::SeqCst);
+        assert!(talk(s, &request).await.starts_with("HTTP/1.1 403"));
+    }
+
+    #[test]
+    fn observer_code_guesses_are_bounded_and_reset_after_the_window() {
+        let s = test_session();
+        for _ in 0..5 {
+            assert!(pair(
+                &s,
+                Pair {
+                    code: "87654321".into()
+                }
+            )
+            .unwrap_err()
+            .contains("Incorrect"));
+        }
+        assert!(pair(
+            &s,
+            Pair {
+                code: "12345678".into()
+            }
+        )
+        .unwrap_err()
+        .contains("Too many"));
+        *s.pair_attempts.lock().unwrap() = (Instant::now() - Duration::from_secs(31), 5);
+        assert_eq!(
+            pair(
+                &s,
+                Pair {
+                    code: "12345678".into()
+                }
+            )
+            .unwrap()["access"],
+            "test-only-access"
+        );
+        assert!(serde_json::from_value::<Pair>(json!({"code":"12345678", "arm":true})).is_err());
+        for _ in 0..10 {
+            let code = new_code().unwrap();
+            assert_eq!(code.len(), 8);
+            assert!(code.bytes().all(|b| b.is_ascii_digit()));
+        }
     }
 
     #[tokio::test]
@@ -638,6 +789,9 @@ mod tests {
             address: Ipv4Addr::new(192, 168, 1, 10),
             port: PORT,
             access: "test-only-access".into(),
+            code: "12345678".into(),
+            code_tag: hmac::sign(&key, b"12345678"),
+            pair_attempts: Mutex::new((Instant::now(), 0)),
             auth_key: key,
             auth_tag: tag,
             active: AtomicBool::new(true),

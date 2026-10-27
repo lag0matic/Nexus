@@ -15,9 +15,24 @@ export async function observerState(): Promise<ObserverRadio> {
   return request('/observer/read/state')
 }
 
+export async function pairBrowser(entered: string): Promise<void> {
+  const code = entered.replace(/\s/g, '')
+  if (!/^\d{8}$/.test(code)) throw new Error('Enter the eight-digit code shown in Nexus')
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 3000)
+  try {
+    const response = await fetch('/observer/pair', { method: 'POST', signal: controller.signal,
+      cache: 'no-store', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })
+    if (!response.ok) throw new Error(await response.text())
+    const result = await response.json() as { access?: unknown }
+    if (typeof result.access !== 'string' || !/^[a-f0-9]{64}$/.test(result.access)) throw new Error('Invalid access response')
+    window.__NEXUS_OBSERVER_ACCESS__ = result.access
+  } finally { window.clearTimeout(timeout) }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const access = window.__NEXUS_OBSERVER_ACCESS__
-  if (!access) throw new Error('Open an access link from the laptop')
+  if (!access) throw new Error('Enter the access code shown in Nexus')
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 3000)
   try {

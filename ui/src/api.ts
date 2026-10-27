@@ -233,7 +233,7 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 // Public API
 // ---------------------------------------------------------------------------
 
-export type ObserverPanelStatus = { running: boolean; address: string; port: number; links: Partial<Record<'pota' | 'conditions' | 'needed', string>> }
+export type ObserverPanelStatus = { running: boolean; address: string; port: number; accessCode?: string; links: Partial<Record<'pota' | 'conditions' | 'needed', string>> }
 export type ObserverPanelAction = { kind: 'status' | 'stop' } | { kind: 'start'; address?: string; port?: number }
 export async function observerPanelAction(action: ObserverPanelAction): Promise<ObserverPanelStatus> {
   return invoke<ObserverPanelStatus>('observer_panel_action', { action, origin: isStreamInput() ? 'stream' : 'shack' })

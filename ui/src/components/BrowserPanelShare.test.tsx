@@ -17,7 +17,7 @@ describe('local browser sharing control', () => {
   it('starts only on an explicit local press and revokes sharing on Stop', async () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true })
     const off = { running: false, address: '192.168.1.10', port: 7375, links: {} }
-    const on = { ...off, running: true, links: { pota: 'http://192.168.1.10:7375/panels/pota#access=test-only-access' } }
+    const on = { ...off, running: true, accessCode: '12345678', links: { pota: 'http://192.168.1.10:7375' } }
     vi.mocked(observerPanelAction).mockResolvedValueOnce(off).mockResolvedValueOnce(on).mockResolvedValueOnce(off)
     render(<BrowserPanelShare panel="pota" />)
     expect(observerPanelAction).not.toHaveBeenCalled()
@@ -26,9 +26,12 @@ describe('local browser sharing control', () => {
     expect(observerPanelAction).toHaveBeenLastCalledWith({ kind: 'status' })
     fireEvent.click(screen.getByRole('button', { name: 'Start sharing' }))
     await screen.findByDisplayValue(on.links.pota)
+    expect(screen.getByLabelText('Browser address')).toHaveProperty('value', on.links.pota)
+    expect(screen.getByLabelText('Access code')).toHaveProperty('value', '1234 5678')
     expect(observerPanelAction).toHaveBeenLastCalledWith({ kind: 'start', address: off.address, port: 7375 })
     fireEvent.click(screen.getByRole('button', { name: 'Stop sharing' }))
     await waitFor(() => expect(observerPanelAction).toHaveBeenLastCalledWith({ kind: 'stop' }))
     await waitFor(() => expect(screen.queryByDisplayValue(on.links.pota)).toBeNull())
+    expect(screen.queryByLabelText('Access code')).toBeNull()
   })
 })

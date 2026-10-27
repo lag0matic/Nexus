@@ -5,6 +5,12 @@ All notable changes to Nexus (formerly Tempo) are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0-longwave.8] - 2026-10-27
+
+### Changed
+- Browser panels open from a short laptop address and port, followed by an eight-digit access code displayed locally in Nexus. No long secret needs to be typed, copied or put in the address bar. Panel navigation keeps the same connected tab; a new tab or reload asks for the code again.
+- Access-code guesses are limited to five attempts per thirty seconds across the sharing session. Stop sharing revokes connected tabs and the code; restarting sharing generates fresh credentials. Receive-only tuning restrictions are unchanged.
+
 ## [1.21.0-longwave.7] - 2026-10-27
 
 ### Added
