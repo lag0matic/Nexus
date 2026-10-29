@@ -170,6 +170,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Carry Longwave upload status and the guarded manual upload action into the new upstream contact card.
 - Sort the Longwave upload column through the shared engine query path, like the other logging services.
 
+### Restored Upstream Note
+The following original entry was dropped by upstream merge `2aee6446`; its expanded counterpart remains under Unreleased above.
+- **Running the setup again from Settings keeps your licence class.** The setup's last step always opened on "Outside the US", whatever class was saved, and its Finish wrote that class back: running it again from Settings ▸ Appearance and finishing without touching the licence set a Technician or General station to "Outside the US" and took the transmit lockout off. It now opens on your saved class, and a setup finished or skipped without a change writes nothing to your settings.
+
 ## [1.21.0-longwave.8] - 2026-10-27
 
 ### Changed
