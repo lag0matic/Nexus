@@ -14,6 +14,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::Manager;
+use tempo_app::engine::engine_try_lock;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -481,9 +482,7 @@ fn listen(s: &Session, request: Listen) -> Result<(), String> {
 fn apply_listen(request: &Listen) -> Result<(), String> {
     let app = TV_APP.get().ok_or("Still starting up")?;
     let engine = app.state::<SharedEngine>();
-    let mut e = engine
-        .try_lock()
-        .map_err(|_| "The laptop is busy; click again")?;
+    let mut e = engine_try_lock(&engine).map_err(|_| "The laptop is busy; click again")?;
     e.observer_listen(request.radio, request.mhz, &request.mode)
 }
 
@@ -494,7 +493,7 @@ fn cached_read(s: &Session, cmd: &str, args: &str) -> Result<Value, String> {
     if cmd == "state" {
         let app = TV_APP.get().ok_or("Still starting up")?;
         let engine = app.state::<SharedEngine>();
-        let e = engine.try_lock().map_err(|_| "The laptop is busy")?;
+        let e = engine_try_lock(&engine).map_err(|_| "The laptop is busy")?;
         let radio = e.snapshot().radio;
         return Ok(
             json!({ "radio": e.settings().active_radio, "mhz": e.settings().dial_mhz,

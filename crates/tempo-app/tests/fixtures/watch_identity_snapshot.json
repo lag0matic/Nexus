@@ -76,6 +76,11 @@
     "holdTxFreq": false,
     "hrdLinkUp": null,
     "hrdQueued": 0,
+    "ic7300RxControls": [
+      null,
+      null,
+      null
+    ],
     "keyboardMode": "PSK31",
     "manualNotch": null,
     "micGain": null,
@@ -171,6 +176,7 @@
     "timeSyncOk": true,
     "trPeriodSecs": 7.5,
     "transmitting": false,
+    "tunerSwitchSupported": false,
     "tuning": false,
     "txAlc": null,
     "txAllowed": true,
