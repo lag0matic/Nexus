@@ -42,12 +42,13 @@ import {
   snrForCall,
   stdMessageList,
   toggleIgnored,
+  txRowIndex,
 } from '../txMessages'
-import { atuTune, closePanelWindow, openPanelWindow, getSettings, notifyErase, setSettings, setMsk144Period, type FdRulesetDto } from '../api'
+import { atuBypass, atuTune, closePanelWindow, openPanelWindow, getSettings, notifyErase, setSettings, setMsk144Period, type FdRulesetDto } from '../api'
 import { WSPR_WATERFALL_WINDOW } from '../waterfall'
 import { ftOverlay } from '../spectrum/overlays'
 import { FdAdvisories } from './FdAdvisories'
-import { pointRotatorAtCall, redecode, startCq, startRunning, startSearchAndPounce, startQsoRecording, stopQsoRecording } from '../api'
+import { clearDxCall, pointRotatorAtCall, redecode, startCq, startRunning, startSearchAndPounce, startQsoRecording, stopQsoRecording } from '../api'
 import { setDecodeDepth } from '../api'
 import { setSkipTx1 as setSkipTx1Cmd } from '../api'
 import { qrzLookup, resolveEntity } from '../api'
@@ -992,13 +993,33 @@ export function OperateCockpit({
     setLocalNext(null)
     // #204 — AND THE CALLSIGN CARD, which is the half that was missing. Two owners, so two
     // moves: `selectedCall` is backend state and rounds through the app (`selectPeer(null)`),
-    // while the sequencer's `qso.dxcall` is NOT ours to clear — a QSO is not cancelled by
-    // tidying the screen — so the card is dismissed for THAT call and comes back by itself the
+    // while the sequencer's `qso.dxcall` is not this screen's to clear — F4 and the Clear button
+    // end the contact in the engine (`clearDxAndContact`, below), the after-log clear does not —
+    // so the card is dismissed for THAT call and comes back by itself the
     // moment the card would be about a different station. `recallCallRef` carries the value
     // because this callback is created once, the same way `keyRef` does for the key handler.
     setDismissedCall(recallCallRef.current)
     onClearSelection?.()
   }, [onClearSelection])
+
+  // F4 and the Clear button are WSJT-X's `clearDX` (mainwindow.cpp:10075), which ENDS the contact
+  // with the station in the box, not only the box: the engine drops that contact, resets its start
+  // time and turns TX off, so nothing more goes to that station. Editing the DX Call box away from
+  // the station being worked ends it too (`on_dxCallEntry_textChanged`, :10563); a typed call is
+  // then worked fresh when a Tx button sends to it. The after-log clear below stays on the screen:
+  // that contact is already logged and closing.
+  const endContact = () => {
+    void clearDxCall().then((s) => onSnap?.(s)).catch((e) => pushToast(String(e), 'error'))
+  }
+  const clearDxAndContact = () => {
+    clearDx()
+    endContact()
+  }
+  const editDxCall = (v: string) => {
+    setDxCall(v)
+    const live = snap.qso?.dxcall ?? snap.fieldDay?.dxcall ?? null
+    if (live && v.trim().toUpperCase() !== live.toUpperCase()) endContact()
+  }
 
   // Stock "Clear DX call and grid after logging": App bumps the tick when a
   // QSO is logged with the option on. Skip the mount tick.
@@ -1009,6 +1030,23 @@ export function OperateCockpit({
       clearDx()
     }
   }, [dxClearTick, clearDx])
+
+  // A BAND CHANGE, by any route, clears the DX call in every mode this cockpit runs, FT8 and FT4
+  // and the other FT modes alike, and in a contest too (operator rulings, 2026-10-26): the engine
+  // has ended the contact, or the contest's partner (`Engine::on_band_change`), and bumped
+  // `bandChangeTick`, and the boxes follow, so Tx1–Tx5 are those of no DX station. WSJT-X keeps the DX call on a band
+  // change; Nexus clears it, because the old station is not on the new band. A contact the engine
+  // already started on the new band (a spot on another band, clicked: the QSY and the call are one
+  // act) stays — the effect below fills its boxes. Declared BEFORE that effect, so a snapshot that
+  // carries both runs the clear first.
+  const bandTickSeen = useRef(snap.bandChangeTick)
+  useEffect(() => {
+    const seen = bandTickSeen.current
+    bandTickSeen.current = snap.bandChangeTick
+    if (seen == null || snap.bandChangeTick == null || snap.bandChangeTick === seen) return
+    if (!snap.qso?.dxcall) clearDx()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.bandChangeTick])
 
   // A retarget/abandon makes a remembered Tx-slot pick meaningless — without
   // this the next-dot stayed lit on a stale row of the NEW station's panel.
@@ -1056,11 +1094,9 @@ export function OperateCockpit({
   const contestCqTyped = snap.contestCqTyped === true
 
   // The six panel rows (Tx5 + Tx6 = the live editable texts). The "next" dot
-  // follows qso.txNow when it matches a row, else the operator's local pick.
+  // follows the row qso.txNow stands for (txRowIndex), else the operator's local pick.
   const rowTexts = stdMessageList({ ...msgs, tx5, tx6: contestCq ?? tx6 })
-  const txNow = snap.qso?.txNow ?? null
-  const liveNext = txNow ? rowTexts.indexOf(txNow) : -1
-  const nextIndex = liveNext >= 0 ? liveNext : localNext
+  const nextIndex = txRowIndex(rowTexts, snap.qso?.txNow) ?? localNext
 
   /** #254's refusal of a Tx6 text that is not a CQ in WSJT-X's grammar, naming the form that
    *  would work when `cqSuggestionFromText` can derive one from the operator's own words. */
@@ -1157,8 +1193,8 @@ export function OperateCockpit({
   // onHaltTx, WSJT-X's Esc, but heard before any control on the screen can swallow the key, and
   // only with stop authority, so an observer's Esc on the hosted page attempts no halt.
   useEscStop(active, onHaltTx)
-  const keyRef = useRef({ doTx, clearDx, redecode: handleRedecode })
-  keyRef.current = { doTx, clearDx, redecode: handleRedecode }
+  const keyRef = useRef({ doTx, clearDx: clearDxAndContact, redecode: handleRedecode })
+  keyRef.current = { doTx, clearDx: clearDxAndContact, redecode: handleRedecode }
   useEffect(() => {
     if (!active) return
     const onKey = (e: KeyboardEvent) => {
@@ -1407,7 +1443,7 @@ export function OperateCockpit({
               compact
               dxCall={dxCall}
               dxGrid={dxGrid}
-              onDxCall={setDxCall}
+              onDxCall={editDxCall}
               onDxGrid={setDxGrid}
               messages={msgs}
               tx5={tx5}
@@ -1418,7 +1454,7 @@ export function OperateCockpit({
               nextIndex={nextIndex}
               onTx={doTx}
               onGenerate={handleGenerate}
-              onClear={clearDx}
+              onClear={clearDxAndContact}
               qsoMacros={qsoMacros}
             />
           </div>
@@ -1977,7 +2013,11 @@ export function OperateCockpit({
               storageKey="nexus.split.operate.waterfall"
               min={88}
               max={420}
-              defaultPct={22}
+              // 25 % of the SHELL, as every cockpit's waterfall starts (2026-10-26: "width and height to
+              // be consistent"). The strip stands in the body, under the cockpit's own rows, so the
+              // default is measured against the shell; a stored height stays a share of the body.
+              defaultPct={25}
+              defaultOf={() => wfRef.current?.closest<HTMLElement>('main.operate-cockpit') ?? null}
               label={t('operate.waterfall.splitter.label')}
             />
           </>
@@ -1999,6 +2039,11 @@ export function OperateCockpit({
             // A control that keys the transmitter must never fail silently: the backend
             // returns every refusal (TX off, busy, lockout) WITH ITS REASON — show it.
             void atuTune()
+              .then((s) => onSnap?.(s))
+              .catch((e) => pushToast(String(e), 'error'))
+          }
+          onAtuBypass={() =>
+            void atuBypass()
               .then((s) => onSnap?.(s))
               .catch((e) => pushToast(String(e), 'error'))
           }
@@ -2029,6 +2074,7 @@ export function OperateCockpit({
           onResend={onResend}
           onFreetext={onFreetext}
           onLog={onLog}
+          logWaiting={snap.logQsoWaiting ?? 0}
           onSetTxEven={onSetTxEven}
           onSetTxCycleAuto={onSetTxCycleAuto}
           skipTx1={skipTx1}
@@ -2308,7 +2354,7 @@ export function OperateCockpit({
                       compact
                       dxCall={dxCall}
                       dxGrid={dxGrid}
-                      onDxCall={setDxCall}
+                      onDxCall={editDxCall}
                       onDxGrid={setDxGrid}
                       messages={msgs}
                       tx5={tx5}
@@ -2319,7 +2365,7 @@ export function OperateCockpit({
                       nextIndex={nextIndex}
                       onTx={doTx}
                       onGenerate={handleGenerate}
-                      onClear={clearDx}
+                      onClear={clearDxAndContact}
                       qsoMacros={qsoMacros}
                     />
                   )}

@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useEscStop } from './useEscStop'
 import { publishBandConditions } from './bandConditions'
-import type { AppSnapshot, BandChannel, LoggedQso, ModeRequest, Settings, SourceKind, Tier } from './types'
+import type { AppSnapshot, BandChannel, ExperienceLevel, LoggedQso, ModeRequest, Settings, SourceKind, Tier } from './types'
 import { isOnAir } from './types'
 import { rigModeTransition, RIG_MODE_BY_VIEW, type RigMode } from './rigModeForView'
 import {
@@ -43,6 +43,7 @@ import {
   setActiveRadio as apiSetActiveRadio,
   setPegLock as apiSetPegLock,
   setTune as apiSetTune,
+  atuBypass as apiAtuBypass,
   atuTune as apiAtuTune,
   haltTx as apiHaltTx,
   setTxEven as apiSetTxEven,
@@ -56,6 +57,7 @@ import {
 import { withErrorToast, pushToast, dismissToast, setPopupNotifications, setPopupMinSeconds } from './toast'
 import { contestStartWarning } from './features/contestLocation'
 import { keptFileMessage } from './features/keptFiles'
+import { flexVoiceNeedsDax } from './features/flexDaxNote'
 import { useActivationNotices } from './useActivationNotices'
 import { t } from './i18n'
 import { resolveUnits, setUnitsMirror } from './units'
@@ -97,6 +99,7 @@ import type { BoxSource, RailLink } from './components/panes/CockpitBox'
 import { publishDashRailSwitch, type DashRailSwitch } from './components/dashRailSwitch'
 import { usePaneWidths, LEFT_MIN, RIGHT_MIN } from './usePaneWidths'
 import { PaneSeam } from './components/PaneSeam'
+import { WATERFALL_SPLIT_MAX, WATERFALL_SPLIT_MIN } from './features/paneSeam'
 import { TopBar } from './components/TopBar'
 import { StationList, type StationFilter } from './components/StationList'
 import { Conversation } from './components/Conversation'
@@ -118,6 +121,7 @@ import { RttyCockpit } from './components/RttyCockpit'
 import { PskCockpit } from './components/PskCockpit'
 import { Js8Cockpit, type Js8ListSettings } from './components/Js8Cockpit'
 import { JttyCockpit } from './components/JttyCockpit'
+import { Js8SoundPlayer } from './components/Js8SoundPlayer'
 import { js8ComposeConfig } from './js8Compose'
 import { SstvView } from './components/SstvView'
 import { AprsCockpit } from './components/AprsCockpit'
@@ -155,6 +159,8 @@ import {
   pskSetMode,
   setHuntTarget,
   setLicenseClass,
+  setExperienceLevel as apiSetExperienceLevel,
+  markSetupWizardSeen,
   stopQsoRecording,
   pointRotatorAtCall,
   qsySetEnabled as apiQsySetEnabled,
@@ -163,6 +169,7 @@ import {
   useSingleRadio,
   resendChat,
   type RadioLaunchInfo,
+  type IotaOfferData,
   focusWindow,
 } from './api'
 import {
@@ -230,9 +237,11 @@ import { useStationAlerts } from './useStationAlerts'
 import { RevealNudge } from './components/RevealNudge'
 import { SetupWizard, type WizardDraft } from './components/SetupWizard'
 import { GettingStartedGuide } from './components/GettingStartedGuide'
+import { FirstContactWalk } from './components/FirstContactWalk'
 import { RadioPicker } from './components/RadioPicker'
 import { PROFILES, type ProfileId } from './features/profiles'
 import { CallCardHost } from './components/CallCard'
+import { useRadioSwitchNotice } from './useRadioSwitchNotice'
 
 // ⚠️ THIS FILE IS ON THE MIGRATED LIST (i18n/hardcoded-strings.test.ts). It is the shell: it
 // renders no cockpit control of its own, so what moved is its OWN prose — the loading line,
@@ -306,13 +315,15 @@ const OPERATE_TIERS: Tier[] = [
  *  no top bar, so no Stop TX of its own (the operator's 2026-10-01 ruling). */
 const ESC_HALT_VIEWS: ReadonlySet<View> = new Set<View>(['chat', 'phone', 'jtty', 'sstv', 'aprs', 'sats', 'connect'])
 /** The screen of each section the station reports (`radio.operatingMode`), for a computer driving
- *  it to follow. 'keyboard' is PSK's screen, the section's own landing. */
+ *  it to follow. 'keyboard' is PSK's screen, the section's own landing; 'jtty' is the Keyboard
+ *  section while the station names JTTY as its modem (`radio.keyboardMode`). */
 const SCREEN_BY_SECTION: Partial<Record<string, View>> = {
   digital: 'operate',
   phone: 'phone',
   cw: 'cw',
   rtty: 'rtty',
   keyboard: 'psk',
+  jtty: 'jtty',
 }
 function App() {
   const [theme, setTheme, themeChoice] = useTheme()
@@ -359,6 +370,9 @@ function App() {
   // First-run setup wizard (goal-driven). Only on a genuinely fresh install, and never by itself on a
   // computer driving another station: it sets up a station, and there every setting it edits is the
   // station's, while "fresh" is read from this computer's own storage. Settings still offers it.
+  // "Fresh" is decided by the settings file as well (`setupWizardSeen`, below): this computer's
+  // storage only says the wizard MAY be due; it opens only where there was no settings file and it
+  // was never done, so a WebView data reset or a reinstall never shows it to an existing station.
   const [showWizard, setShowWizard] = useState<boolean>(
     () => !drivesAnotherStation() && features.firstRun && storageWritable() && !wizardSeen(),
   )
@@ -366,6 +380,12 @@ function App() {
   // walkthrough offer. Pure documentation: it writes nothing and is never
   // shown unasked, so there is no "seen" flag to persist.
   const [showGuide, setShowGuide] = useState(false)
+  // The first-run question ("How much have you done?") is asked only when the wizard opens by
+  // itself on a fresh install; re-opened from Settings it does not ask again.
+  const [wizardAsks, setWizardAsks] = useState(showWizard)
+  // The first-contact walk-through (Help ▸ Your first FT8 contact, and the wizard's offer). Like
+  // the guide it writes nothing; asked for together with the guide, it opens once the guide closes.
+  const [showWalk, setShowWalk] = useState(false)
   // `scale` so the rail clamps re-run on zoom change (ceilings are zoom-relative).
   const { leftW, rightW, leftMax, rightMax, commitLeft, commitRight, resetLeft, resetRight, resetWidths } =
     usePaneWidths(scale)
@@ -609,6 +629,8 @@ function App() {
   // calling). The FT8/FT4 ⇄ Tempo switch binds the radio tier+mode and swaps only
   // the cockpit; Connect/Map/Prop/Logbook/Awards are GLOBAL views selected from the
   // sidebar (they never retune the radio). Default FT8/FT4 (the 80% case).
+  // Tempo's full-width waterfall strip (2026-10-26), the box its height divider sizes.
+  const tempoWfRef = useRef<HTMLDivElement>(null)
   const [area, setArea] = useState<'dx' | 'msg'>(() => {
     try {
       // coerceArea (test-pinned) also migrates the retired 'connect' area to
@@ -1265,20 +1287,25 @@ function App() {
   // Keyed on the station's value alone, so the operator's own pick (sent by the rig-mode effect)
   // is never pulled back by a snapshot taken before the station answered it. A screen with no
   // section of its own (Map, Logbook…) stays put, as does a section whose screen is switched off.
+  // PSK and JTTY are one section, so in it the screen is the modem the station names on the air
+  // (`keyboardMode`). A station too old to name it reports the section alone, where either keyboard
+  // screen is the station's and a screen from elsewhere lands on PSK's, as before.
   const stationSection = snap?.radio.operatingMode
+  const stationModem = stationSection === 'keyboard' ? snap?.radio.keyboardMode : undefined
+  const stationScreen = stationModem === 'JTTY' ? 'jtty' : stationSection
   useEffect(() => {
-    if (!drivesAnotherStation() || !stationSection) return
+    if (!drivesAnotherStation() || !stationScreen) return
     const own = RIG_MODE_BY_VIEW[viewRef.current]
     if (!own) return
-    if ((own === 'jtty' ? 'keyboard' : own) === stationSection) return
-    const target = SCREEN_BY_SECTION[stationSection]
+    if (own === stationScreen || (!stationModem && own === 'jtty' && stationScreen === 'keyboard')) return
+    const target = SCREEN_BY_SECTION[stationScreen]
     if (!target || !features.isOn(target)) return
     lastOpModeRef.current = RIG_MODE_BY_VIEW[target] ?? 'digital'
     lastHomedModeRef.current = lastOpModeRef.current
     afarEntryRef.current = target
     setView(target)
     // The station's section alone: a re-run on the screen changing would pull the operator's pick back.
-  }, [stationSection])
+  }, [stationScreen])
   // Declared here (rather than beside bandPlan below) because the need gate reads it: the
   // band scopes live in settings and everything derived from `needAlerts` sits right below.
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -1695,8 +1722,8 @@ function App() {
   }, [])
 
   const handleConfirmLog = useCallback(
-    (record: LoggedQso) => {
-      void apiConfirmPendingLog(record, snap?.pendingQsoLogKey)
+    (record: LoggedQso, iotaOffer?: IotaOfferData | null) => {
+      void apiConfirmPendingLog(record, snap?.pendingQsoLogKey, iotaOffer)
         .then((s) => {
           setSnap(s)
           refreshNeeds() // drop the just-worked station from the roster/needs immediately
@@ -1845,9 +1872,9 @@ function App() {
         highlightSecondary: settings.js8HighlightSecondary ?? [],
         eot: settings.js8Eot ?? '\u2662',
         mfi: settings.js8Mfi ?? '\u2026\u2026',
-        sounds: settings.js8Sounds ?? [],
         groups: settings.js8Groups ?? [],
         avoidAllcall: settings.js8AvoidAllcall ?? false,
+        resetActivity: settings.js8ResetActivity === true,
         setRxBlocklist: async (calls: string[]) => {
           const saved = await withErrorToast(() => js8SetRxBlocklist(calls), t('js8.lists.saveFailed'))
           if (saved) setSettings((prev) => (prev ? { ...prev, js8RxBlocklist: saved } : prev))
@@ -1923,6 +1950,12 @@ function App() {
   // lockout, no tuner) WITH ITS REASON, and the toast shows it.
   const handleAtuTune = useCallback(() => {
     void apiAtuTune()
+      .then((s) => setSnap(s))
+      .catch((e) => pushToast(String(e), 'error'))
+  }, [])
+  // The click on ATU ON (#344): the tuner out of line. Keys nothing; refused on the air.
+  const handleAtuBypass = useCallback(() => {
+    void apiAtuBypass()
       .then((s) => setSnap(s))
       .catch((e) => pushToast(String(e), 'error'))
   }, [])
@@ -2525,8 +2558,11 @@ function App() {
         // The engine's verdict, not the call returning (#100): every false is a deliberate
         // logbook-integrity refusal (already logged, no active QSO, no report exchanged),
         // and a green "Logged QSO" over one claimed a write that never happened.
-        if (r.logged) {
-          pushToast(t('shell.toast.logged'), 'success', 2500)
+        if (r.logged && r.alreadyWaiting && r.call) {
+          // Nothing new was held: that station's offer already waits in the popup.
+          pushToast(t('shell.toast.logWaiting', { call: r.call }), 'info', 4000)
+        } else if (r.logged) {
+          pushToast(r.call ? t('shell.toast.loggedCall', { call: r.call }) : t('shell.toast.logged'), 'success', 2500)
           refreshNeeds() // drop the just-worked station from the roster/needs immediately
           // QRZ/ClubLog/eQSL auto-upload happens in the BACKEND log funnel now
           // (every log path, auto-log included); outcomes toast via uploadTick.
@@ -2552,6 +2588,10 @@ function App() {
   // The contest re-entry an opened screen asked for, until the engine answers. Until then the snapshot
   // still shows the station out of the contest, and the CW and Phone log lines must not call it stopped.
   const [contestReentering, setContestReentering] = useState(false)
+
+  // The JS8 new-message notice's "Show" (Js8SoundPlayer, from any screen): the station whose Inbox the
+  // JS8 screen opens on, a new `seq` for each ask.
+  const [js8InboxAsk, setJs8InboxAsk] = useState<{ call: string; seq: number } | null>(null)
 
   const handleView = useCallback(
     (next: View) => {
@@ -2617,6 +2657,19 @@ function App() {
     },
     [],
   )
+
+  // When Nexus switches radio by itself and the station asked to be told: one line with Undo
+  // (the operator's own radio pick, back to the radio it left) and Why? (the routing rules).
+  useRadioSwitchNotice({
+    snap,
+    policy: settings?.radioSwitchPolicy,
+    selectRadio: (id) =>
+      apiSetActiveRadio(id).then((s) => {
+        if (s) setSnap(s)
+        return s
+      }),
+    openSettingsAt,
+  })
 
   const handleTier = useCallback((next: Tier) => {
     void withErrorToast(() => apiSetTier(next), t('shell.tier.failed')).then((s) => {
@@ -2772,16 +2825,53 @@ function App() {
     [applyWizardDraft],
   )
 
+  // The durable half of "the wizard was done": its one writer, in the settings file. Failure is
+  // not toasted: the wizard is closed either way, and the browser copy above still holds for
+  // this computer.
+  const recordWizardSeen = useCallback(() => {
+    void markSetupWizardSeen()
+      .then(() => setSettings((prev) => (prev ? { ...prev, setupWizardSeen: true } : prev)))
+      .catch(() => {})
+  }, [])
+  // A wizard that would open by itself waits for the settings file's word: an existing station
+  // (no `setupWizardSeen: false`) is never shown it, nor asked the question.
+  useEffect(() => {
+    if (!settings || !wizardAsks || settings.setupWizardSeen === false) return
+    setShowWizard(false)
+    setWizardAsks(false)
+  }, [settings, wizardAsks])
+
   const handleWizardApply = useCallback(
-    (ids: ProfileId[], landing: View, modes: FeatureId[], license: string, draft: WizardDraft) => {
+    (
+      ids: ProfileId[],
+      landing: View,
+      modes: FeatureId[],
+      license: string | null,
+      draft: WizardDraft,
+      experience: ExperienceLevel | null,
+    ) => {
       // SEQUENCED, not concurrent: set_settings writes the WHOLE struct
       // (licenseClass included), so a concurrent set_license_class would be
       // reverted by the stale class riding in the merge (review catch — the
       // wizard's own TX-lockout promise silently undone). Draft first, class
-      // second; failures surface instead of a false-success close.
+      // second; failures surface instead of a false-success close. The class only when the wizard
+      // changed it (null = the class the station holds), and App's copy follows it so the next
+      // run opens on it, as the experience answer's does.
       void applyWizardDraft(draft)
-        .then(() => setLicenseClass(license))
-        .then((s) => s && setSnap(s))
+        .then(() => (license ? setLicenseClass(license) : null))
+        .then((s) => {
+          if (!s || !license) return
+          setSnap(s)
+          setSettings((prev) => (prev ? { ...prev, licenseClass: license } : prev))
+        })
+        // The experience answer has its own writer; a later form save keeps it. Only an answer
+        // given in this run is written: none leaves the station's (absent = never asked).
+        .then(() => (experience ? apiSetExperienceLevel(experience) : null))
+        .then((s) => {
+          if (!s || !experience) return
+          setSnap(s)
+          setSettings((prev) => (prev ? { ...prev, experienceLevel: experience } : prev))
+        })
         .catch((e) =>
           pushToast(
             t('shell.wizard.saveFailed', { error: `${e instanceof Error ? e.message : e}` }),
@@ -2789,21 +2879,27 @@ function App() {
             0,
           ),
         )
-      // Goal profiles + the chosen operating modes (CW/Phone) force-enabled on top.
-      features.applyProfiles(ids, modes)
+      // Goal profiles + the chosen operating modes (CW/Phone) force-enabled on top, on the
+      // first run only. Re-run from Settings, the wizard edits station, rig and log and keeps the
+      // screens the operator has on now: it never changes the feature set.
+      if (wizardAsks) features.applyProfiles(ids, modes)
       setView(landing)
       markWizardSeen()
+      // The first run is recorded as done in the settings file; a re-run from Settings already is,
+      // and writes nothing it did not change.
+      if (wizardAsks) recordWizardSeen()
       setShowWizard(false)
       setWizardGen((g) => g + 1)
     },
-    [features.applyProfiles, applyWizardDraft],
+    [features.applyProfiles, applyWizardDraft, wizardAsks, recordWizardSeen],
   )
 
   const handleWizardSkip = useCallback(() => {
     markWizardSeen()
+    if (wizardAsks) recordWizardSeen()
     setShowWizard(false)
     setWizardGen((g) => g + 1)
-  }, [])
+  }, [recordWizardSeen, wizardAsks])
 
   // NOTE: everything from here down to the `!snap` early return is snap-INDEPENDENT
   // and — critically for the hooks below — must run on EVERY render (rules of hooks:
@@ -3053,16 +3149,6 @@ function App() {
 
   const waterfallRail = (
     <aside className="right-rail panel">
-      <Waterfall
-        transmitting={snap.radio.transmitting}
-        rxOffsetHz={snap.radio.rxOffsetHz}
-        txOffsetHz={snap.radio.txOffsetHz}
-        theme={theme}
-        onTune={handleTune}
-        paletteScope={FT_PALETTE_SCOPE}
-        markerWidthHz={ftMarkerWidthHz}
-        txBlanks // FT surface — a 13 s over may go dark; see the prop's doc.
-      />
       <OperateDecodes
         decodes={snap.recentDecodes}
         late={snap.lateDecodes}
@@ -3083,13 +3169,38 @@ function App() {
     </aside>
   )
 
-  // Three-pane workspace: stations | center | waterfall, with drag splitters
-  // between each. The waterfall lives in the right rail at every width; the rail
-  // only narrows on the sm/xs collapse. (This used to claim a `data-layout`
-  // top-strip alternative — there was no writer and no CSS behind it.)
+  // Three-pane workspace: a full-width waterfall strip under the header, then stations | center |
+  // the rail (Band Activity and the link pill), with drag splitters between each. THE WATERFALL
+  // STRIP (2026-10-26, "width and height to be consistent"): every mode's waterfall starts at the
+  // same full width and 25 % of the shell, so Tempo's left the right rail (where it was 299 px wide
+  // at 1366×768) for a strip across the top, sized by its own divider as FT's is. The strip is
+  // the workspace grid's own row (styles.css `.layout[data-three-pane]`, `--tempo-wf-h`) and stays
+  // in the same parent at every width, so it never remounts; on the sm/xs collapse it stacks first.
   const threePane = (center: JSX.Element, header?: JSX.Element) => (
     <main className={`layout${header ? ' has-tempo-header' : ''}`} data-three-pane>
       {header && <div className="grid-header">{header}</div>}
+      <Waterfall
+        stripRef={tempoWfRef}
+        transmitting={snap.radio.transmitting}
+        rxOffsetHz={snap.radio.rxOffsetHz}
+        txOffsetHz={snap.radio.txOffsetHz}
+        theme={theme}
+        onTune={handleTune}
+        paletteScope={FT_PALETTE_SCOPE}
+        markerWidthHz={ftMarkerWidthHz}
+        txBlanks // FT surface — a 13 s over may go dark; see the prop's doc.
+      />
+      <PaneSeam
+        axis="y"
+        varName="--tempo-wf-h"
+        strip={tempoWfRef}
+        className="tempo-wf-seam"
+        storageKey="nexus.split.tempo.waterfall"
+        min={WATERFALL_SPLIT_MIN}
+        max={WATERFALL_SPLIT_MAX}
+        defaultPct={25}
+        label={t('shell.waterfall.splitter.label')}
+      />
       <div className="grid-stations">{stationsPanel}</div>
       <PaneSeam
         axis="x"
@@ -3104,7 +3215,7 @@ function App() {
         onReset={resetLeft}
       />
       <div className="grid-center">{center}</div>
-      {/* This divider is the waterfall rail's LEFT edge: moving it left widens the rail. */}
+      {/* This divider is the right rail's LEFT edge: moving it left widens the rail. */}
       <PaneSeam
         axis="x"
         className="right"
@@ -3136,7 +3247,7 @@ function App() {
     // and mode it is spotted on? If so, Hide worked leaves it alone.
     needAlerts: boardAlerts,
     // The Spot me in the board's head (SpotsSpotMe): the station's mode, which its comment names.
-    spotMe: { section: snap.radio.operatingMode, sideband: snap.radio.sideband, tier },
+    spotMe: { section: snap.radio.operatingMode, keyboardMode: snap.radio.keyboardMode, sideband: snap.radio.sideband, tier },
   }
   const neededBoard = {
     // Un-gated by MODE FEATURE — the board's own per-mode toggles decide what shows,
@@ -3335,6 +3446,7 @@ function App() {
   const phoneWorkspace = (
     <PhoneCockpit
       esmSetting={esmSettingFor('phone')}
+      flexDaxNote={settings ? flexVoiceNeedsDax(settings) : false}
       onResumeContest={resumeContest}
       onOpenLogbook={openLogbookFor}
       onEntryCall={reportEntry.phone}
@@ -3454,6 +3566,7 @@ function App() {
                 fdRuleset={fdRuleset}
                 tier={tier}
                 section={snap.radio.operatingMode}
+                keyboardMode={snap.radio.keyboardMode}
                 onOpenSettings={openSettingsAt}
                 onSettingsSaved={handleSettingsSaved}
                 contestSwitch={contestSwitch}
@@ -3584,7 +3697,10 @@ function App() {
             onLocalClockChange={setLocalClock}
             onResetLayout={resetWidths}
             features={features}
-            onRerunWizard={() => setShowWizard(true)}
+            onRerunWizard={() => {
+              setWizardAsks(false)
+              setShowWizard(true)
+            }}
             theme={themeChoice}
             onThemeChange={setTheme}
             skin={skin}
@@ -3779,7 +3895,7 @@ function App() {
       // policy entry needed — global sections leave the VFO alone).
       workspace = (
         <main className="layout single">
-          <RadioProgView myGrid={settings?.mygrid ?? ''} catOk={snap.radio.catOk === true} />
+          <RadioProgView myGrid={settings?.mygrid ?? ''} catOk={snap.radio.catOk === true} onOpenSettings={openSettingsAt} />
         </main>
       )
       break
@@ -3830,6 +3946,7 @@ function App() {
               onSetTxEnabled={handleSetTxEnabled}
               onSetTune={handleSetTune}
               onAtuTune={handleAtuTune}
+              onAtuBypass={handleAtuBypass}
               onHaltTx={handleHaltTx}
               onSetHoldTxFreq={handleSetHoldTxFreq}
             />,
@@ -3942,6 +4059,7 @@ function App() {
         tier={tier}
         onTierChange={handleTier}
         onOpenGuide={() => setShowGuide(true)}
+        onOpenWalk={() => setShowWalk(true)}
         field={fieldMode}
         onFieldChange={setFieldMode}
         // Who is at the key (#25). Absent/empty renders nothing — the single-op case —
@@ -4218,6 +4336,7 @@ function App() {
                     onSetTxEnabled={handleSetTxEnabled}
                     onTune={snap.radio.atu != null ? handleSetTune : undefined}
                     onAtuTune={handleAtuTune}
+                    onAtuBypass={handleAtuBypass}
                     onStopTx={handleHaltTx}
                   />
                 }
@@ -4252,8 +4371,27 @@ function App() {
                 compose={js8ComposeConfig(settings)}
                 onSavedMessages={(js8SavedMessages) => setSettings((prev) => (prev ? { ...prev, js8SavedMessages } : prev))}
                 lists={js8Lists}
+                paneStyle={settings?.js8PaneStyle}
+                inboxRequest={js8InboxAsk}
               />
             </div>
+          )}
+          {/* JS8Call's sounds from whichever screen is showing (Js8SoundPlayer): beside the JS8 host,
+              not inside it, and handed nothing about the view, so the screen shown never decides
+              whether a sound plays. */}
+          {isViewEnabled('js8') && (
+            <Js8SoundPlayer
+              tier={snap?.link.tier}
+              sounds={settings?.js8Sounds ?? []}
+              files={settings?.js8SoundFiles ?? {}}
+              myCall={snap?.mycall ?? ''}
+              groups={settings?.js8Groups ?? []}
+              logTick={snap?.logTick}
+              onShowMessage={(call) => {
+                handleView('js8')
+                setJs8InboxAsk((was) => ({ call, seq: (was?.seq ?? 0) + 1 }))
+              }}
+            />
           )}
           {workspace}
         </ErrorBoundary>
@@ -4304,7 +4442,7 @@ function App() {
         />
       )}
 
-      {showWizard && settings && (
+      {showWizard && settings && (!wizardAsks || settings.setupWizardSeen === false) && (
         // Gated on settings: the prefills are one-shot useState initializers,
         // and mounting against null would turn the whole real config into
         // "fields the operator cleared" at draft time (review catch).
@@ -4316,6 +4454,10 @@ function App() {
           onProveTx={handleProveTx}
           onSkip={handleWizardSkip}
           onOpenGuide={() => setShowGuide(true)}
+          onOpenWalk={() => setShowWalk(true)}
+          onOpenServices={() => openSettingsAt('confirmations')}
+          askExperience={wizardAsks}
+          rerun={!wizardAsks}
         />
       )}
 
@@ -4323,6 +4465,13 @@ function App() {
         <GettingStartedGuide
           onClose={() => setShowGuide(false)}
           onOpenSettings={openSettingsAt}
+        />
+      )}
+
+      {showWalk && !showGuide && (
+        <FirstContactWalk
+          onClose={() => setShowWalk(false)}
+          doubleClickSetsTx={settings?.doubleClickSetsTx !== false}
         />
       )}
 

@@ -43,10 +43,21 @@ What the app needs from you before it can do anything:
 - **A sound card the radio is connected to**, for any mode that decodes or
   transmits audio — [Settings ▸ Radio ▸ Audio](settings-reference.md#audio).
 
-On first launch a four-step wizard — Station, Rig, Log, Finish — walks those.
-Every step is skippable and everything it sets stays editable later in Settings.
-Every section and mode starts ON; turn any section on or off in
-[Settings ▸ Appearance ▸ Features](settings-reference.md#features).
+On first launch a wizard walks those. It first asks how much you have done (new to
+the hobby, new to digital, or experienced), then Station, Rig, Log, Finish. The
+answer picks which sections start on: experienced starts with every section and mode
+ON, the two "new" answers with fewer, and a new ham is offered a short walk through a
+first FT8 contact (also under Help). The same first page asks how many radios Nexus
+will run: with two or more, the radio setup (which radio for which bands and modes)
+opens once the second radio is saved on the Rig step. Answered experienced, the Log step
+shows the import preview before anything is written and where your contacts go (each
+logbook service's state and QRZ Logbook's Test); logins stay in
+[Settings ▸ Confirmations](settings-reference.md#confirmations) and nothing is uploaded
+from the wizard. Every step is skippable and everything it sets
+stays editable later: the answer in
+[Settings ▸ Station](settings-reference.md#operator--radio), any section on or off in
+[Settings ▸ Appearance ▸ Features](settings-reference.md#features). Run again from
+Settings, the wizard edits station, rig and log only and keeps the screens you have on.
 
 The supported window floor is **1024×768**. Everything is reachable there — some
 columns scroll to reach the bottom of themselves, and the pages that measure it

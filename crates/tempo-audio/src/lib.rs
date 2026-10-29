@@ -89,6 +89,9 @@ mod js8_slot;
 #[cfg(feature = "device")]
 pub mod jttyrx;
 pub mod monitor;
+/// Notification sounds on an output the operator picks, never on a device the station transmits
+/// from (VOX safety). The guard and the tones are pure; the output is behind `device`.
+pub mod notify_sound;
 /// OmniRig (VE3NEA's Windows COM rig-control server) as a CAT backend — a local
 /// rigctld-protocol shim over COM, so `Rig` and every CAT verb are unchanged.
 pub mod omnirig;
@@ -133,6 +136,7 @@ pub mod sstvrx;
 /// feature like the Flex and Icom network clients.
 #[cfg(feature = "device")]
 pub mod tci;
+pub mod txextras;
 pub mod usbrig;
 /// Which rig a sound card or serial port belongs to, from USB topology (macOS).
 pub mod usbtopo;

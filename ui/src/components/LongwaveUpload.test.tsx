@@ -2,12 +2,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { LongwaveUpload } from './LongwaveUpload'
-import { QsoDetail } from './QsoDetail'
+import { ContactCard } from './ContactCard'
 import type { LoggedQso } from '../types'
 
 const mocks = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn(), toast: vi.fn() }))
 vi.mock('../api', () => ({ longwavePushQso: mocks.push }))
-vi.mock('../features/logSource', () => ({ logSource: () => ({ refresh: mocks.refresh }) }))
+vi.mock('../features/logSource', async importOriginal => ({ ...await importOriginal<object>(), logSource: () => ({ refresh: mocks.refresh }), useLogAnswer: () => null }))
 vi.mock('../toast', () => ({ pushToast: mocks.toast }))
 vi.mock('./QsoHistory', () => ({ QsoHistory: () => null }))
 beforeEach(() => vi.resetAllMocks())
@@ -95,11 +95,12 @@ it('permits retry after a definitive rejection', async () => {
   expect(button().disabled).toBe(false)
 })
 
-it('shows Longwave pending as unconfirmed beside the other upload marks in detail', () => {
-  const { rerender } = render(<QsoDetail qso={contact('pending')} longwaveConfigured onClose={() => {}} />)
+it('shows Longwave pending as unconfirmed on the upstream contact card', () => {
+  const props = { onClose: vi.fn(), onSwitch: vi.fn(), save: vi.fn(), onChanged: vi.fn(), onReload: vi.fn() }
+  const { rerender } = render(<ContactCard open={{ row: contact('pending'), ref: null }} longwaveConfigured {...props} />)
   expect(screen.getByText('Longwave upload')).toBeTruthy()
   expect(screen.getByText('Unconfirmed. Sync history and check Longwave before sending again.')).toBeTruthy()
   expect(button().disabled).toBe(true)
-  rerender(<QsoDetail qso={contact()} onClose={() => {}} />)
+  rerender(<ContactCard open={{ row: contact(), ref: null }} {...props} />)
   expect(screen.queryByRole('button', { name: 'Upload to Longwave' })).toBeNull()
 })

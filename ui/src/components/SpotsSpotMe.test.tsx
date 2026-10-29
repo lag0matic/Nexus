@@ -25,7 +25,7 @@ vi.mock('../toast', async (importOriginal) => ({
 
 import { SpotsPanel } from './SpotsPanel'
 
-type Station = { section?: string; sideband?: string; tier?: string }
+type Station = { section?: string; keyboardMode?: string; sideband?: string; tier?: string }
 
 const board = (spotMe?: Station) => (
   <SpotsPanel spots={[]} bandPlan={[]} selectedCall={null} onSelect={() => {}} onWork={() => {}} pane={{ scope: 'phone' }} spotMe={spotMe} />
@@ -78,6 +78,10 @@ describe('Spot me on the Spots board', () => {
     rerender(board({ section: 'keyboard', sideband: 'PKTUSB' }))
     await settle()
     expect(comment().value).toBe('CQ QPSK31')
+    // PSK and JTTY are one section: the station's own word for the mode on the air wins.
+    rerender(board({ section: 'keyboard', sideband: 'PKTUSB', keyboardMode: 'JTTY' }))
+    await settle()
+    expect(comment().value).toBe('CQ JTTY')
   })
 
   it('keeps the last comment typed for each mode, and an emptied box gives the default back', () => {
@@ -156,7 +160,7 @@ describe('Spot me on the Spots board', () => {
 
   it.each([
     ['spotNoCall', 'Not spotted: set your callsign in Settings first.'],
-    ['spotNoCluster', 'Not spotted: no DX cluster is connected. Set a cluster in Settings ▸ Spot Sources.'],
+    ['spotNoCluster', 'Not spotted: no DX cluster is connected. Set a cluster in Settings ▸ Logging & Connectors ▸ Integrations & Feeds ▸ Spot Sources.'],
     // The contest screen's spot went a moment ago: the station's one cooldown holds this button too.
     ['spotCooldown:42', 'Not spotted again yet: one spot a minute. 42 s to go.'],
     ['spotOffBand', 'Not spotted: the dial is outside the amateur bands.'],

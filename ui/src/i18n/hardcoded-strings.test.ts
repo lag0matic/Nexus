@@ -152,19 +152,22 @@ const MIGRATED = [
   // The words for an export that lacks recent changes the logbook database did not hold yet,
   // which the Logbook's exports and Settings' WRL export share — born migrated.
   'features/exportLacks.ts',
-  // The QSO detail view (#313) — born migrated: every string in it is a catalog key.
-  'components/QsoDetail.tsx',
+  // The Logbook contact card (it took over #313's detail view) — born migrated: every string in it
+  // is a catalog key.
+  'components/ContactCard.tsx',
   'components/LongwaveSync.tsx',
   'components/LongwaveUpload.tsx',
   'components/QsoHistory.tsx',
   'components/RecentlyDeleted.tsx',
   // The import preview and its no-loss report's words — born migrated.
   'components/ImportPreview.tsx',
+  'components/Iota.tsx',
   'features/logImport.ts',
   'components/LogTools.tsx',
   'components/LogDupes.tsx',
   'components/LogBulkEdit.tsx',
   'components/LogCheck.tsx',
+  'components/LogGridFill.tsx',
   'components/LogCallbookUpdate.tsx',
   'features/logCleanup.ts',
   // The Logbook's country picker — born migrated: the entity names and numbers it lists are data.
@@ -197,6 +200,7 @@ const MIGRATED = [
   // lookup happens when the string is read rather than when the module loads.
   'components/AwardsView.tsx',
   'components/AwardsMore.tsx',
+  'components/AwardStatus.tsx',
   'components/CallStatsPane.tsx',
   'components/RecentQsosPane.tsx',
   'components/AwardsJourney.tsx',
@@ -283,6 +287,9 @@ const MIGRATED = [
   // Check confirmations (2026-10-07) — born migrated: LoTW, calls, bands, modes and credit codes
   // are tokens, held as data or a named constant.
   'components/ConfirmationReview.tsx',
+  // Cards to send (2026-10-27) — born migrated: calls, bands, modes and the label stocks' product
+  // names are tokens.
+  'components/QslCardsToSend.tsx',
   'components/SpotLegend.tsx',
   'components/BandMap.tsx',
   'components/ContestSpotMe.tsx',
@@ -316,6 +323,13 @@ const MIGRATED = [
   'selfSpot.ts',
   // The activation's notices (2026-10-25): born migrated, both sentences catalog keys.
   'useActivationNotices.ts',
+  // The radio switch notice (2026-10-27): born migrated. The radio name, the band and the routing
+  // mode name in it are data.
+  'useRadioSwitchNotice.ts',
+  // The first-contact walk-through and the experience answers (2026-10-27): born migrated. The TX
+  // buttons' names in the walk are the strip's own untranslated labels, quoted as data.
+  'components/FirstContactWalk.tsx',
+  'settings/experience.ts',
   'components/ContestView.tsx',
   'components/ContestOperators.tsx',
   // The activator's pane and its Stop checklist (2026-10-25): born migrated.
@@ -333,6 +347,13 @@ const MIGRATED = [
   // The contest setup (2026-10-26): born migrated — every string is a catalog key; contest names,
   // Cabrillo tokens and UTC times are invariant tokens.
   'components/ContestSetupWizard.tsx',
+  // The radio setup (2026-10-27): born migrated — every string is a catalog key; radio names,
+  // band tokens, model names, ports and the routing mode names are data or invariant tokens.
+  'components/RadioSetupWizard.tsx',
+  // The first-run journeys (2026-10-28): born migrated — every string is a catalog key; the
+  // logbook services' names and accounts are data from the backend.
+  'components/WizardServices.tsx',
+  'settings/journeys.ts',
   // What keeps a contest from starting, moved out of ContestView beside it: catalog keys only.
   'features/contestStart.ts',
   'components/ContestScoreChip.tsx',
@@ -347,6 +368,8 @@ const MIGRATED = [
   'features/contestLocation.ts',
   'features/contestUnsaved.ts',
   'features/contestSpotMarks.ts',
+  // The work-in buttons' words (Work this contest in CW / Phone / RTTY): born migrated.
+  'features/contestWorkIn.ts',
   // The warn-only FD advisories (2026-08-29): born migrated — its two banner/header
   // chips are catalog keys from birth; the mode names, event names and assistance-source
   // labels it interpolates are invariant tokens.
@@ -724,6 +747,14 @@ const MIGRATED = [
   'components/TciServerSettings.tsx',
   // The voice keyer's Delete and its Undo window — migrated from birth.
   'features/voiceDelete.ts',
+  // The ATU button's menu, "Switch tuner out" (#344) — migrated from birth.
+  'components/AtuSwitchOutMenu.tsx',
+  // Settings ▸ Digital ▸ JS8's colours and fonts (JS8Call's UI tab) — migrated from birth. The samples'
+  // calls, offsets and reports are data.
+  'components/Js8PaneStyleSettings.tsx',
+  // The JS8 sounds from any screen, and a sound file's notice when it cannot play — migrated from birth.
+  'components/Js8SoundPlayer.tsx',
+  'features/js8Sounds.ts',
 ]
 
 /**

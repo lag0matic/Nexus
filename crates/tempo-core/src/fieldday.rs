@@ -415,8 +415,18 @@ impl LoggedQso {
     /// The same answer as `FdRuleset::mode_banned(&self.submode)` without its allocation, which the
     /// scorer's walk of every row on every snapshot must not make: the row's mode is stored trimmed
     /// and uppercase, and the loader takes a banned mode only uppercase and non-empty.
+    ///
+    /// ⭐ **…except a `CW` row, whose CLASS is its mode.** A CW contact records no submode (CW
+    /// needs none, [`FieldDayLog::log_mode_at`]), and that is not missing evidence: it
+    /// was worked in CW. A contest that bans CW (the ARRL RTTY Roundup, RTTY only) must not
+    /// credit it for having nothing in the submode.
     pub fn banned_under(&self, rs: &crate::fd_rules::FdRuleset) -> bool {
-        rs.banned_modes.iter().any(|&m| m == self.submode)
+        let mode = if self.submode.is_empty() && self.mode == "CW" {
+            "CW"
+        } else {
+            self.submode.as_str()
+        };
+        rs.banned_modes.contains(&mode)
     }
 
     /// ⭐ **What the dupe key needs to know about this row's bird** — [`SatKey`]'s
@@ -3335,9 +3345,15 @@ impl FieldDayLog {
             // for it, and what CQ WW RTTY X.3 asks for: "other stations indicate 'DX'". A
             // sponsor whose LOCATION list spells a place differently from its exchange
             // (CQ WW RTTY's `PEI` is `PE` there) maps it through `cabrillo.location`.
+            //
+            // A sponsor whose LOCATION is a station setting (the ARRL RTTY Roundup's ARRL/RAC
+            // section, `cabrillo.location_setting`) heads a W/VE entry with it; a blank one
+            // falls back to the state.
             location: sent_location.unwrap_or_else(|| {
                 if self.session.role().id == "dx" {
                     "DX".to_string()
+                } else if !self.session.location_setting.is_empty() {
+                    self.session.location_setting.clone()
                 } else {
                     let state = self.session.my_location.state.as_str();
                     rs.cabrillo_location
@@ -4134,9 +4150,21 @@ pub struct FieldDayStation {
     /// The direction of the operator's Tx6 CQ, called where WSJT-X has no activity
     /// ([`set_cq_dir`](Self::set_cq_dir)); empty for a plain CQ.
     cq_dir: String,
+    /// When the contact in hand began: the moment this station engaged [`dxcall`](Self::dxcall)
+    /// ([`engage`](Self::engage)). Cleared when the station re-arms.
+    started_unix: Option<u64>,
+    /// `(seq, start)` of the contacts this sequencer logged lately, newest last, at most
+    /// [`ROW_STARTS_KEPT`]: WSJT-X sends a contact's start time beside its end time
+    /// (`MessageClient::qso_logged`'s `time_on`), and a row records only the moment it was
+    /// logged. Read by the WSJT-X UDP sink, which sends a row the slot after it is logged.
+    row_starts: Vec<(u64, u64)>,
     pub log: FieldDayLog,
     pub transcript: Vec<String>,
 }
+
+/// How many [`FieldDayStation::row_starts`] a station keeps: far more than the contacts one slot
+/// can log, and a bound, so a weekend's run does not grow it.
+const ROW_STARTS_KEPT: usize = 32;
 
 impl FieldDayStation {
     fn mycall(&self) -> &str {
@@ -4165,6 +4193,8 @@ impl FieldDayStation {
             wsjtx_field_day: false,
             picked: false,
             cq_dir: String::new(),
+            started_unix: None,
+            row_starts: Vec::new(),
             log: FieldDayLog::new(mycall, session, band),
             transcript: Vec::new(),
         }
@@ -4189,6 +4219,8 @@ impl FieldDayStation {
             wsjtx_field_day: false,
             picked: false,
             cq_dir: String::new(),
+            started_unix: None,
+            row_starts: Vec::new(),
             log: FieldDayLog::new(mycall, session, band),
             transcript: Vec::new(),
         }
@@ -4215,6 +4247,7 @@ impl FieldDayStation {
     pub fn rearm(&mut self, running: bool) {
         self.picked = false;
         self.dxcall = None;
+        self.started_unix = None;
         self.peer_exch = None;
         self.peer_grid = None;
         if running {
@@ -4258,7 +4291,7 @@ impl FieldDayStation {
             FtMessages::FieldDay => self.my_exch_msg(de, false),
             FtMessages::NaVhf | FtMessages::Standard => self.grid_answer(de),
         };
-        self.dxcall = Some(de.to_string());
+        self.engage(de);
         // The standard messages never carry the runner's grid again, so its CQ's is the one
         // logged; the VHF contests log the grid the runner rogers with, Field Day none.
         self.peer_grid = (self.messages == FtMessages::Standard).then(|| grid.to_string());
@@ -4273,6 +4306,37 @@ impl FieldDayStation {
     /// contact, where the run keeps TX on to call CQ again.
     pub fn picked(&self) -> bool {
         self.picked
+    }
+
+    /// Work `de`: it becomes [`dxcall`](Self::dxcall), and the contact's clock starts
+    /// ([`started_unix`](Self::started_unix)). Only a timestamp: nothing sent, and no state,
+    /// moves here.
+    fn engage(&mut self, de: &str) {
+        self.started_unix = Some(now_unix());
+        self.dxcall = Some(de.to_string());
+    }
+
+    /// When the contact this sequencer logged as row `seq` began, if it logged that row lately
+    /// ([`row_starts`](Self::row_starts)). `None` for a row logged by hand, or long ago.
+    pub fn started_unix_of(&self, seq: u64) -> Option<u64> {
+        self.row_starts
+            .iter()
+            .rev()
+            .find(|(s, _)| *s == seq)
+            .map(|(_, t)| *t)
+    }
+
+    /// Note when the row this sequencer just logged began. `logged`: the log's answer.
+    fn note_row_start(&mut self, logged: bool) {
+        let (Some(start), true) = (self.started_unix, logged) else {
+            return;
+        };
+        if let Some(seq) = self.log.qsos().last().map(|q| q.seq) {
+            if self.row_starts.len() >= ROW_STARTS_KEPT {
+                self.row_starts.remove(0);
+            }
+            self.row_starts.push((seq, start));
+        }
     }
 
     /// Whether what this station sends carries its grid: every set of messages but Field
@@ -4480,8 +4544,10 @@ impl FieldDayStation {
         let call = crate::message::unhash_call(call);
         let (rx, tx) = self.exchanged(grid);
         let submode = self.log.current_submode.clone();
-        self.log
+        let logged = self
+            .log
             .log_exchange_at(call, rx, tx, "DIG", &submode, slot, now_unix());
+        self.note_row_start(logged);
         self.transcript
             .push(format!("logged {call} {}", grid.unwrap_or_default()));
     }
@@ -4493,7 +4559,8 @@ impl FieldDayStation {
     /// message fills with the brackets dropped (`DecodedText`, decodedtext.cpp 66).
     fn log_field_day(&mut self, call: &str, class: &str, section: &str, slot: u64) {
         let call = crate::message::unhash_call(call);
-        self.log.log(call, class, section, slot);
+        let logged = self.log.log(call, class, section, slot);
+        self.note_row_start(logged);
     }
 
     /// My Field Day exchange to `to`, rogered or not (WSJT-X's Tx3 and Tx2).
@@ -4554,7 +4621,7 @@ impl FieldDayStation {
                         section,
                     },
                 ) if self.to_my_call(to) => {
-                    self.dxcall = Some(de.clone());
+                    self.engage(de);
                     self.peer_exch = Some((de.clone(), class.clone(), section.clone()));
                     self.pending = Some(self.my_exch_msg(de, true));
                     self.state = FdState::AwaitConfirm;
@@ -4578,7 +4645,7 @@ impl FieldDayStation {
                         section,
                     },
                 ) if self.to_my_call(to) => {
-                    self.dxcall = Some(de.clone());
+                    self.engage(de);
                     self.log_field_day(de, class, section, slot);
                     self.pending = Some(self.rr73(de));
                     self.state = FdState::Done;
@@ -4671,7 +4738,7 @@ impl FieldDayStation {
                 (FdState::CallingCq, Msg::Grid { to, de, grid })
                     if self.to_me(to) && !grid.is_empty() && !de.contains("<...>") =>
                 {
-                    self.dxcall = Some(de.clone());
+                    self.engage(de);
                     self.peer_grid = Some(grid.clone());
                     self.pending = Some(rogered_grid(de, &self.my_call_beside(), &self.air_grid()));
                     self.state = FdState::AwaitConfirm;
@@ -4724,7 +4791,7 @@ impl FieldDayStation {
                 (FdState::CallingCq, Msg::Grid { to, de, grid })
                     if self.to_me(to) && !grid.is_empty() && !de.contains("<...>") =>
                 {
-                    self.dxcall = Some(de.clone());
+                    self.engage(de);
                     self.peer_grid = Some(grid.clone());
                     self.pending = Some(Msg::Report {
                         to: de.clone(),
@@ -4745,7 +4812,7 @@ impl FieldDayStation {
                     let Some(his) = self.gridless_caller(de) else {
                         continue;
                     };
-                    self.dxcall = Some(de.clone());
+                    self.engage(de);
                     self.peer_grid = None;
                     self.pending = Some(Msg::Report {
                         to: his,
@@ -4761,7 +4828,7 @@ impl FieldDayStation {
                 (FdState::CallingCq, Msg::Report { to, de, .. })
                     if self.to_me(to) && !de.contains("<...>") =>
                 {
-                    self.dxcall = Some(de.clone());
+                    self.engage(de);
                     self.pending = Some(Msg::RReport {
                         to: de.clone(),
                         de: self.my_call_beside(),
@@ -6054,6 +6121,39 @@ mod tests {
         assert_eq!(sp.log.qsos()[0].section(), "WI");
     }
 
+    /// ⭐ **A contact the sequencer logs keeps when it BEGAN** — the start WSJT-X sends as a
+    /// `QSOLogged`'s `time_on` beside the end it was logged at. The clock starts when the
+    /// operator picks the station; a contact logged by hand has none to give.
+    #[test]
+    fn a_sequenced_contact_keeps_when_it_began() {
+        let mut sp = FieldDayStation::search_and_pounce(
+            "K2DEF",
+            "FN31",
+            ContestSession::field_day(FdEvent::ArrlFd, "2A", "IL"),
+            "20M",
+        );
+        sp.answer_cq("W9XYZ", "EN37");
+        // The double-click was a minute ago: a start this test can tell from the log time.
+        sp.started_unix = Some(1_000);
+        sp.observe(&[dec("K2DEF W9XYZ R 3A WI")], 1);
+        let q = sp.log.qsos()[0].clone();
+        assert_eq!(sp.started_unix_of(q.seq), Some(1_000));
+        let c =
+            crate::contest::merge::logged_contact(&sp.log, "pos", &q, sp.started_unix_of(q.seq));
+        assert_eq!(c.record.when_unix, 1_000, "the start");
+        assert_eq!(
+            c.record.time_off_unix,
+            Some(q.when_unix),
+            "the end, when it was logged"
+        );
+        assert_eq!(c.exchange_sent, "2A IL");
+        assert_eq!(c.exchange_rcvd, "3A WI");
+        // A contact logged by hand began when it was logged, as far as anything here knows.
+        assert!(sp.log.log("K1ABC", "1D", "CT", 2));
+        let hand = sp.log.qsos()[1].seq;
+        assert_eq!(sp.started_unix_of(hand), None);
+    }
+
     #[test]
     fn running_station_calls_directed_cq_fd() {
         // The running station advertises a DIRECTED Field Day CQ so it reads as
@@ -6260,10 +6360,12 @@ mod tests {
         let year = crate::fd_rules::CURRENT_RULES_YEAR;
         let want = [
             ("arrlfd", FieldDay),
-            // Winter Field Day, Illinois and New York ban FT8 and FT4: nothing new.
+            // Winter Field Day, Illinois and New York ban FT8 and FT4: nothing new. So does the
+            // ARRL RTTY Roundup, which takes RTTY alone (Special Rules 2.2).
             ("wfd", FieldDay),
             ("ilqp", FieldDay),
             ("nyqp", FieldDay),
+            ("arrlrtty", FieldDay),
             ("arrlvhf_jan", NaVhf),
             ("arrlvhf_jun", NaVhf),
             ("arrlvhf_sep", NaVhf),
@@ -6326,7 +6428,7 @@ mod tests {
             .filter_map(|r| r["event"].as_str())
             .collect();
         events.push("");
-        assert_eq!(events.len(), 19);
+        assert_eq!(events.len(), 20);
         for event in events {
             let want = match event {
                 "" | "arrlfd" => (FtMessages::FieldDay, 3),
@@ -6511,10 +6613,10 @@ mod tests {
             .iter()
             .filter_map(|r| r["event"].as_str())
             .collect();
-        assert_eq!(events.len(), 18);
+        assert_eq!(events.len(), 19);
         for event in events {
             let rs = crate::fd_rules::ruleset_by_id(event, year).expect(event);
-            let bans = matches!(event, "wfd" | "ilqp" | "nyqp");
+            let bans = matches!(event, "wfd" | "ilqp" | "nyqp" | "arrlrtty");
             for mode in ["FT8", "FT4"] {
                 assert_eq!(
                     FtMessages::follows_contest(rs, mode),

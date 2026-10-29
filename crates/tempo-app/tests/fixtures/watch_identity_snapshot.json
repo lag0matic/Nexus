@@ -8,6 +8,7 @@
     "text": ""
   },
   "b4MatchMode": false,
+  "bandChangeTick": null,
   "chatCq": "off",
   "clearTick": null,
   "conversations": [],
@@ -25,6 +26,7 @@
     "state": "rx",
     "tier": "FT4"
   },
+  "logQsoWaiting": 0,
   "logSaveTrouble": null,
   "logStoreProblem": null,
   "logTick": null,
@@ -48,6 +50,7 @@
     "attStepsDb": null,
     "atu": null,
     "atuStartTuneUnsupported": false,
+    "atuSwitchOut": false,
     "audioError": null,
     "band": "20m",
     "beacon": false,
@@ -73,6 +76,7 @@
     "holdTxFreq": false,
     "hrdLinkUp": null,
     "hrdQueued": 0,
+    "keyboardMode": "PSK31",
     "manualNotch": null,
     "micGain": null,
     "monitor": null,

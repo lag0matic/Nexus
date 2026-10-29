@@ -29,6 +29,10 @@ export const PER_SURFACE = [
   'nexus-ui-scale-mode',
   // APRS's body (layout L7): the station list column's width and the side the map stands on —
   // statements about THIS window's shape, like Connect's rail widths and Operate's rail side.
+  // The APRS map's own choices: its map, view and filters (features/aprsMap), and its Layers
+  // panel (MapView) — per window, like Connect's map and Layers panel.
+  'nexus.aprs.map',
+  'nexus.aprs.map.layers',
   'nexus.aprs.mapSide',
   'nexus.aprs.railWidth',
   'nexus.awardsTab',
@@ -148,6 +152,8 @@ export const PER_SURFACE = [
   'nexus.split.psk.waterfall',
   'nexus.split.rtty.waterfall',
   'nexus.split.sstv.stage',
+  // Tempo's waterfall strip (2026-10-26): a % of THIS window's workspace grid, the same kind.
+  'nexus.split.tempo.waterfall',
   'nexus.view',
   'nexus.waterfall.dss',
   'nexus.waterfall.flow',
@@ -308,6 +314,9 @@ const SHARED = [
   // buttons, dismissed once for this computer whichever window showed it.
   'nexus.contest.workIn',
   'nexus.contest.workInHint',
+  // The Flex DAX note in the voice keyer (features/flexDaxNote), dismissed once for this computer like
+  // the work-in hint above.
+  'nexus.phone.flexDaxNote',
   'nexus.freqMarkers.changed',
   'nexus.waterfall.detached',
   'nexus.waterfall.gain',
@@ -479,6 +488,7 @@ const INDIRECT: Record<string, string[]> = {
     'nexus.split.logbook.globe',
     'nexus.split.contest.log',
     'nexus.split.contest.recent',
+    'nexus.split.tempo.waterfall',
   ],
   // The Needed board's filter record: its own key as the view and the pop-out, or the key the
   // host of a PANE of it passes (NeededPane — the Phone and CW cockpits', #345, and the

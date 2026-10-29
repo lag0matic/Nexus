@@ -66,6 +66,86 @@ pub enum PttMode {
 /// the slow-transport 2.5 s read window so an un-key can never hang the single-threaded radio loop.
 const PTT_DEADLINE_MS: u64 = 700;
 
+/// How long opening the CAT connection may take, per address the control address resolves to.
+///
+/// ⚠️ RADIO-LOOP LIVENESS. The radio loop opens (and, after any failed command, re-opens) this
+/// connection itself, so an unbounded connect to a network rigctld that is firewalled or switched
+/// off held the loop for the OS SYN-retry time (~127 s on Linux, ~21 s on Windows): no slot
+/// boundary, no PTT deadline, no tune ceiling meanwhile. A rigctld that is there answers in
+/// milliseconds (a local one at once), so this bounds only the connect nobody answers, which then
+/// fails as "not reachable" and the radio reads as down. Three seconds, as for a Flex's own API.
+const CAT_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Open the CAT connection to `addr`, trying each address it resolves to (as
+/// `TcpStream::connect` does) but each within [`CAT_CONNECT_TIMEOUT`]. A connect nobody answers
+/// is `TimedOut` with words saying so; every other failure (a refused port, an unresolvable name)
+/// is returned as the OS gave it, so a local rigctld that is not running reads as it always has.
+fn connect_cat(addr: &str) -> std::io::Result<TcpStream> {
+    use std::net::ToSocketAddrs;
+    let mut last = None;
+    for at in addr.to_socket_addrs()? {
+        match TcpStream::connect_timeout(&at, CAT_CONNECT_TIMEOUT) {
+            Ok(s) => return Ok(s),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(connect_cat_failure(addr, last))
+}
+
+/// The error [`connect_cat`] returns after every address failed with `last` (`None`: the address
+/// resolved to none). A connect nobody answered carries the [`NotReachable`] marker.
+pub(crate) fn connect_cat_failure(addr: &str, last: Option<std::io::Error>) -> std::io::Error {
+    match last {
+        Some(e) if e.kind() == std::io::ErrorKind::TimedOut => std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            NotReachable(format!(
+                "rigctld at {addr} is not reachable: nothing answered within {} s",
+                CAT_CONNECT_TIMEOUT.as_secs()
+            )),
+        ),
+        Some(e) => e,
+        None => std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("rigctld address {addr} resolved to no address"),
+        ),
+    }
+}
+
+/// What [`connect_cat`]'s `TimedOut` carries, in its own words: the connection was never made.
+#[derive(Debug)]
+struct NotReachable(String);
+
+impl std::fmt::Display for NotReachable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NotReachable {}
+
+/// `EHOSTDOWN` ("Host is down"), which std leaves uncategorised: macOS's answer for a LAN host
+/// that does not answer ARP, where Linux answers `EHOSTUNREACH`.
+pub(crate) const EHOSTDOWN: Option<i32> = if cfg!(any(target_os = "linux", target_os = "android")) {
+    Some(112)
+} else if cfg!(target_vendor = "apple") {
+    Some(64)
+} else if cfg!(windows) {
+    Some(10064) // WSAEHOSTDOWN
+} else {
+    None
+};
+
+/// Whether `e` says the CAT host, or the network to it, cannot be reached — a network rigctld
+/// whose machine is switched off or unplugged — rather than a radio behind a reached rigctld
+/// that did not answer, or one that said no. The radio loop counts it as the link not answering
+/// (never a refusal), and says "can't reach" rather than "no reply from the rig".
+pub fn cat_unreachable(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind::*;
+    matches!(e.kind(), HostUnreachable | NetworkUnreachable | NetworkDown)
+        || (e.raw_os_error().is_some() && e.raw_os_error() == EHOSTDOWN)
+        || e.get_ref().is_some_and(|inner| inner.is::<NotReachable>())
+}
+
 /// rigctld command line for PTT.
 pub fn ptt_line(on: bool) -> String {
     format!("T {}\n", on as u8)
@@ -772,7 +852,7 @@ impl Rig {
     fn ensure_connected(&mut self) -> std::io::Result<&mut TcpStream> {
         if self.stream.is_none() {
             if let Some(addr) = &self.control {
-                let s = TcpStream::connect(addr)?;
+                let s = connect_cat(addr)?;
                 s.set_read_timeout(Some(Duration::from_millis(500)))?;
                 s.set_write_timeout(Some(Duration::from_millis(500)))?;
                 self.stream = Some(s);
@@ -1640,32 +1720,28 @@ impl Rig {
     /// off the wire. Diagnostic-only; `None` if not a CAT rig or no reply.
     /// Send a raw CAT string that the rig does NOT answer — a SET.
     ///
-    /// Measured against Hamlib 4.7.0 on an FT-710: a read (`w SS05;`) comes back as
-    /// `SS0570000;\0`, but a set (`w SS0570000;`) returns NOTHING AT ALL — not even an `RPRT`.
-    /// Putting a set through `send_raw` therefore burns the whole reply deadline, returns
-    /// TimedOut, and drops the CAT connection, which is a heavy price for a command that worked.
-    /// So this writes and does not wait. Any late bytes are harmless: `command_inner` drains
-    /// stale bytes before every command precisely so a straggler cannot be read as the next
-    /// command's answer.
+    /// ⛔ **NEVER THROUGH `w`.** rigctld's `w` (send_cmd) writes the string and then waits for
+    /// the radio's reply for the radio's whole read timeout, holding the port, and a Yaesu never
+    /// answers a set (Hamlib 4.7.1 `tests/rigctl_parse.c` `send_cmd`: `read_string(rp, buf,
+    /// rxbytes, …)` runs for a set too; `.timeout` is 1000 ms on the FT-710, 2000 ms on the
+    /// FTDX101, FTDX10, FT-991, FT-891 and FTX-1). Every command after it, the next `T 0`
+    /// included, waited that long: Stop TX on an FT-710 reached the radio 2.06 s late behind the
+    /// two `KY` playback stops, 4.18 s on an FTX-1, against a real rigctld (4.7.1 and 4.5.5).
     ///
-    /// Returns whether the bytes went out — NOT whether the radio honoured them, which nothing
+    /// `W <cmd> 0` (send_cmd_rx) is the same write with a reply length of zero, and Hamlib
+    /// reads nothing for it (`read_string_generic` returns at once for `rxmax < 1`, iofunc.c).
+    /// rigctld then answers with one terminator, a NUL on 4.7.1 and a newline on 4.5.5, which
+    /// `command_inner` takes as a whole reply, so nothing is left in the socket either. The
+    /// deadline is the PTT one: like a key, this waits for rigctld and never for the radio.
+    ///
+    /// Returns whether rigctld took the line — NOT whether the radio honoured it, which nothing
     /// on this path can know. The caller confirms by reading the value back.
     pub fn send_raw_set(&mut self, raw: &str) -> bool {
         if self.control.is_none() {
             return false;
         }
-        let line = format!("w {raw}\n");
-        let Ok(stream) = self.ensure_connected() else {
-            return false;
-        };
-        use std::io::Write as _;
-        match stream.write_all(line.as_bytes()) {
-            Ok(()) => true,
-            Err(_) => {
-                self.stream = None; // force a clean reconnect, same as `command_with_deadline`
-                false
-            }
-        }
+        self.command_with_deadline(&format!("W {raw} 0\n"), Some(PTT_DEADLINE_MS))
+            .is_ok_and(|reply| !reply.trim_start().starts_with("RPRT -"))
     }
 
     pub fn send_raw(&mut self, raw: &str) -> Option<String> {
@@ -1880,6 +1956,14 @@ impl Rig {
     pub fn set_preamp_db(&mut self, db: u8) -> std::io::Result<()> {
         self.cat(&level_line("PREAMP", &db.to_string()))
     }
+    /// Set an Icom's SSB transmit-bandwidth step (`16 58`: 0 WIDE, 1 MID, 2 NAR) through Nexus's
+    /// own CI-V daemon, the only link that answers this token — see `crate::txextras`.
+    pub fn set_ssb_tx_bw(&mut self, idx: u8) -> std::io::Result<()> {
+        self.cat(&level_line(
+            crate::txextras::ICOM_TBW_TOKEN,
+            &idx.to_string(),
+        ))
+    }
     /// Read the attenuator in dB. Through the RAW reader, because [`Rig::read_level`]
     /// filters to 0.0..=1.0 and would REJECT every reading except "off" — which fails
     /// asymmetrically: the control looks healthy until the operator switches a pad in.
@@ -1989,9 +2073,9 @@ impl Rig {
 ///
 /// IT CAN BLOCK, and that is the accepted trade. A CAT unkey over a live stream is bounded by the
 /// 700 ms `PTT_DEADLINE_MS`; if a prior failure dropped the stream, `ensure_connected` reconnects
-/// first and `TcpStream::connect` is bounded only by the OS (immediate against a refused localhost
-/// rigctld — the usual case — but longer for a network rig that has gone away). A teardown that
-/// waits is better than a radio that keeps transmitting.
+/// first, bounded by `CAT_CONNECT_TIMEOUT` (immediate against a refused localhost rigctld — the
+/// usual case — up to that bound for a network rig that has gone away). A teardown that waits is
+/// better than a radio that keeps transmitting.
 impl Drop for Rig {
     fn drop(&mut self) {
         if !self.keyed {
@@ -3654,6 +3738,125 @@ mod tests {
         let mut vox = Rig::vox();
         vox.ptt(true).unwrap();
         drop(vox);
+    }
+
+    /// A listening port that never completes another connection: its accept queue is shrunk to
+    /// nothing and filled, so the kernel drops every further SYN and a connect to it waits out the
+    /// OS SYN retries (~127 s), exactly as one to a firewalled or switched-off network rigctld
+    /// does. Unlike a non-routable address it black-holes the same way in CI and in a private
+    /// network namespace with no route out. Linux only: `listen(fd, 0)` on a socket that is
+    /// already listening only changes its backlog there.
+    #[cfg(target_os = "linux")]
+    fn black_hole() -> (TcpListener, Vec<TcpStream>, String) {
+        use std::os::fd::AsRawFd;
+        unsafe extern "C" {
+            fn listen(fd: i32, backlog: i32) -> i32;
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        // SAFETY: a valid listening socket for the call's whole duration.
+        assert_eq!(
+            unsafe { listen(listener.as_raw_fd(), 0) },
+            0,
+            "listen(fd, 0)"
+        );
+        let at = listener.local_addr().unwrap();
+        let mut held = Vec::new();
+        for _ in 0..8 {
+            match TcpStream::connect_timeout(&at, Duration::from_millis(300)) {
+                Ok(s) => held.push(s),
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    return (listener, held, at.to_string());
+                }
+                Err(e) => panic!("filling the accept queue: {e}"),
+            }
+        }
+        panic!("the accept queue never filled");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_cat_link_nobody_answers_gives_up_in_seconds_as_not_reachable() {
+        // A network rigctld that is firewalled or switched off answers no SYN at all. An
+        // unbounded connect held the radio loop for the OS retry time on every reconnect.
+        let (_listener, _held, addr) = black_hole();
+        let mut rig = Rig::rigctld(&addr);
+        let t0 = std::time::Instant::now();
+        let e = rig
+            .read_freq()
+            .expect_err("nothing answered the connection");
+        let took = t0.elapsed();
+        assert!(
+            took < CAT_CONNECT_TIMEOUT + Duration::from_secs(2),
+            "the connect held the caller {took:?}"
+        );
+        // A slow connect is never success, and giving up early is not the fix either.
+        assert!(took >= CAT_CONNECT_TIMEOUT, "gave up after only {took:?}");
+        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
+        assert!(e.to_string().contains("not reachable"), "{e}");
+        assert!(e.to_string().contains(&addr), "names the address: {e}");
+        // Nothing reached the wire, so this is not "the radio may be acting on it".
+        assert!(!no_answer_in_time(&e), "{e}");
+
+        // Control: a rigctld that is there connects and answers as before, at once.
+        let (live, _log) = mock_rigctld(ok_reply(14_074_000));
+        let mut rig = Rig::rigctld(&live);
+        let t0 = std::time::Instant::now();
+        assert_eq!(rig.read_freq().unwrap(), 14_074_000);
+        assert!(t0.elapsed() < Duration::from_secs(1), "{:?}", t0.elapsed());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_key_over_a_cat_link_nobody_answers_fails_and_halts_the_slot_over() {
+        // Keying over CAT to a radio that cannot be reached must fail, never read as keyed-ok,
+        // and must not be the "deadline passed, the radio may be keying" case a slot over plays
+        // through: the over halts.
+        let (_listener, _held, addr) = black_hole();
+        let mut rig = Rig::rigctld(&addr);
+        let t0 = std::time::Instant::now();
+        let key = rig.ptt(true);
+        assert!(key.is_err(), "keyed with no CAT link");
+        assert!(t0.elapsed() < CAT_CONNECT_TIMEOUT + Duration::from_secs(2));
+        assert!(
+            crate::slot::slot_key_failure(&key, false).is_some(),
+            "a key that never reached the radio must halt the over: {key:?}"
+        );
+        // The teardown unkey (the rig still counts itself keyed) is bounded too.
+        let t0 = std::time::Instant::now();
+        drop(rig);
+        assert!(
+            t0.elapsed() < CAT_CONNECT_TIMEOUT + Duration::from_secs(2),
+            "teardown held {:?}",
+            t0.elapsed()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_cat_host_nobody_answers_is_unreachable_not_a_silent_rig() {
+        // The connection was never made, so this is the CAT host out of reach, not a radio behind
+        // a reached rigctld that did not reply: the two are worded differently to the operator.
+        let (_listener, _held, addr) = black_hole();
+        let e = Rig::rigctld(&addr)
+            .read_freq()
+            .expect_err("nothing answered the connection");
+        assert!(cat_unreachable(&e), "{e:?}");
+
+        // Controls: a rig that did not answer (`RPRT -5`), a refusal (`RPRT -1`), and a local
+        // rigctld that is not running are not "the host cannot be reached".
+        let (addr, _log) = mock_rigctld(|_l| "RPRT -5\n".to_string());
+        let e = Rig::rigctld(&addr).set_mode("USB", -1).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
+        assert!(!cat_unreachable(&e), "{e:?}");
+        let (addr, _log) = mock_rigctld(|_l| "RPRT -1\n".to_string());
+        let e = Rig::rigctld(&addr).set_mode("USB", -1).unwrap_err();
+        assert!(!cat_unreachable(&e), "{e:?}");
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap().to_string();
+        drop(l);
+        let e = Rig::rigctld(&addr).read_freq().unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::ConnectionRefused, "{e}");
+        assert!(!cat_unreachable(&e), "{e:?}");
     }
 
     #[test]

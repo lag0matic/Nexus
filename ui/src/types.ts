@@ -1399,6 +1399,11 @@ export interface RadioStatus {
    * state, so section-dependent surfaces (the Satellites log strip's mode fold) don't
    * need a settings round-trip. */
   operatingMode?: string
+  /** The mode the Keyboard section's contacts log under: 'JTTY' on the JTTY modem, else the PSK
+   * cockpit's sub-mode ('PSK31' | 'QPSK31'). PSK and JTTY are ONE section ('keyboard'), so the
+   * section alone cannot say which is on the air. Read it while `operatingMode` is 'keyboard'.
+   * Absent from a station older than it. */
+  keyboardMode?: string
   /** The rig keyed by something that is NOT Nexus (mic PTT / straight key), read back
    * over CAT (#57). Display-only — the TX badge and meter pane light for it. */
   rigKeyed?: boolean
@@ -1487,6 +1492,22 @@ export interface RadioStatus {
   txAlcZone?: number | null
   txPoW?: number | null
   txCompDb?: number | null
+  /** The radio's own PA (finals) temperature in °C, as its CAT interface last reported it.
+   * Absent where the radio reports none (most do not). Read while receiving and kept across
+   * overs — not a transmit meter. Display converts to °F under the Imperial units setting. */
+  paTempC?: number | null
+  /** The radio's own TEMP meter position, 0–1, where the radio reports a meter and no degrees
+   * (the FTDX101: Yaesu publishes no degree scale for it). Shown as the meter, never as °C/°F. */
+  paTempMeter?: number | null
+  /** The radio's SSB transmit-bandwidth steps in its own order and front-panel words (an
+   * Icom's WIDE/MID/NAR; a Yaesu's is parked for now). Absent where Nexus has no CAT command for
+   * it on this radio, or the radio has not answered a read yet: the selector is then hidden. */
+  txBwSteps?: string[]
+  /** Which of `txBwSteps` the radio read back as. */
+  txBw?: string | null
+  /** May the TX meters offer the speech-processor (PROC) switch: true only where its write is the
+   * radio maker's own command (the native Icom link's `16 44`). Absent = not offered. */
+  txProcSwitch?: boolean
   /** Can Nexus put a NUMBER to this radio's SWR — i.e. may the high-SWR cutoff be offered?
    * True only on the native Icom CI-V daemon and a FlexRadio's own VITA meter stream, the two
    * paths that convert the raw meter with a scale we can point at. Elsewhere `txSwr` is
@@ -1560,6 +1581,10 @@ export interface RadioStatus {
    * its in-line state are real) and is disabled with a reason pointing at the radio's own TUNER
    * button. Absent = nothing says it can't, which is how every station behaved before 1.14. */
   atuStartTuneUnsupported?: boolean
+  /** The ATU button's menu offers "Switch tuner out" (#344): a tuner, and a CAT path that can
+   * switch it out — never Nexus's own Flex client, never the native Icom path. Absent (an older
+   * station) = not offered. */
+  atuSwitchOut?: boolean
   /** Rig RX passband / filter width in Hz over CAT; null/absent = unknown or the rig's default. */
   filterWidthHz?: number | null
   /** RIT (receive incremental tuning) offset in Hz — last commanded (0 = off). */
@@ -1687,6 +1712,10 @@ export interface RadioStatus {
    *  renders this INSTEAD of the address, because with the bind refused that address is one
    *  nothing is listening on. */
   catShareError?: string | null
+  /** The port the CAT broker is actually serving on (#165); absent while it is not serving.
+   *  Settings' "Sharing port" unless another program already held that, in which case sharing
+   *  stepped aside to the next free port and this is the address programs must use. */
+  catSharePort?: number | null
   /** "Share by TCI" as the station runs it: where programs connect, why it is not serving, and the
    *  programs connected. Absent while the server is off (mirror of the Rust TciServerStatus). */
   tciServer?: TciServerStatus | null
@@ -2003,6 +2032,9 @@ export interface JttyLine {
   /** A message this station SENT (WSJT-X shows it in the QSO Frequency pane, its SNR blank);
    *  absent on a received one. */
   tx?: boolean
+  /** Found by decoding again (WSJT-X's review): which review, numbered from 1. The panes show
+   *  each review's lines together under a heading. Absent for live reception. */
+  review?: number
 }
 
 /** A JTTY station decoded in two separate messages (`tempo_app::dto::JttyHeard`). */
@@ -2054,7 +2086,40 @@ export interface JttyTxState {
   pending: string
   /** WSJT-X's queue notice: replaced characters, complete, cancelled, or why it stopped. */
   notice: string | null
+  /** WSJT-X's "Frames: sent/total" for this over (the filler in neither). Absent in an older
+   *  fixture. */
+  framesSent?: number
+  framesTotal?: number
+  /** The newest Log QSO prompt: a send starting "TU " went out (WSJT-X's `logQSOTimer`). A
+   *  prompt only; nothing is logged unless the operator logs it. Absent in an older fixture. */
+  logPrompt?: JttyLogPrompt | null
+  /** WSJT-X's "Message style": which of the two F-key sets F1-F8 send. Absent in an older
+   *  fixture, which reads as Contest. */
+  style?: JttyMessageStyle
+  /** The eight templates F1-F8 send in that style: the keys' captions. */
+  fkeys?: string[]
 }
+
+/** The Log QSO prompt after a JTTY "TU " send (`tempo_app::dto::JttyLogPrompt`). */
+export interface JttyLogPrompt {
+  /** Numbered from 1 each session: the cockpit asks once per prompt. */
+  id: number
+  /** The DX call the send was made with; empty when there was none. */
+  call: string
+  /** The serial number the exchange sent, before it moved on. */
+  serial: number
+  atUtcMs: number
+  /** The station whose prompt this one replaced while it was still unanswered: that contact is
+   *  logged from the log strip. Absent in an older engine's answer. */
+  replaced?: string | null
+}
+
+/** How an answer of a JTTY Log QSO prompt went (`tempo_app::dto::JttyLogPromptAnswer`): `taken`
+ *  lets this screen log; the rest say why not. */
+export type JttyLogPromptAnswer = 'taken' | 'answered' | 'logged' | 'replaced' | 'expired'
+
+/** WSJT-X's two JTTY F-key sets (`Jtty::MessageStyle`): Contest, and FT8 style. */
+export type JttyMessageStyle = 'contest' | 'ft8'
 
 /** What a JTTY send did: how much of the typed text it took (UTF-16 units), what goes in its
  *  place (the macros expanded), and the state after it. */
@@ -2690,6 +2755,9 @@ export interface LoggedContest {
   /** The exchange as logged, field by field: `[field, value]`. */
   sent?: [string, string][]
   rcvd?: [string, string][]
+  /** The exchange's own standard ADIF columns, `[tag, value]` (`CNTY`, `ARRL_SECT`, `CQZ` …): what
+   *  exports, uploads and awards read for those fields on this contact. */
+  adif?: [string, string][]
 }
 
 /** On-the-air (POTA/SOTA) references for a QSO. POTA maps to ADIF SIG/SIG_INFO, SOTA to SOTA_REF. */
@@ -3000,6 +3068,9 @@ export type NeedTag =
   | 'NewMode'
   | 'NewGrid'
   | 'NewState'
+  /** An IOTA island group never worked, on any band. Set only when the station's group is known:
+   * a spot comment that names it, or a callbook answer for exactly that call (needalert.rs). */
+  | 'NewIota'
   /** A POTA/SOTA reference not yet worked in the activation running right now — a genuine
    * need, unlike the Pota/Sota labels below. See HuntedActivations (needalert.rs). */
   | 'NewPark'
@@ -3061,6 +3132,9 @@ export interface NeedAlert {
   /** The WAE country this station would be new in on this band in this mode class. Sent only
    *  while "Show WAE country needs" is on (off as it ships); the board shows a WAE chip for it. */
   waeNeed?: string | null
+  /** The IOTA island group the station is on, when its spot's comment or a callbook answer named
+   * one — present on a NewIota row, and on a Confirm row the group raised. */
+  iota?: string | null
 }
 
 /** One raw cluster/RBN spot for the Spots panel (the firehose).
@@ -3092,6 +3166,8 @@ export interface SpotRow {
   /** Seconds since received; -1 if unknown. */
   ageSecs: number
   comment: string
+  /** The IOTA island group the comment names, when it names exactly one (`iota::in_comment`). */
+  iota?: string
   /** Operator may transmit at this freq+mode (license privileges; Open class ⇒ true). */
   licensed: boolean
   /** At least one voice for this spot — the spotter or a corroborator — is on the operator's
@@ -3576,10 +3652,23 @@ export interface CustomAwardsView {
  * (basic IOTA = 100 confirmed). */
 export interface IotaProgress {
   worked: number
-  /** Confirmed in the log sense (LoTW or card). */
+  /** Confirmed by LoTW or card (never eQSL) — what the IOTA programme credits. */
   confirmed: number
-  /** Card-confirmed — the only channel the IOTA program accepts (never LoTW). */
+  /** Confirmed by card alone, shown beside it. */
   cardConfirmed: number
+}
+
+/** The US Counties award (CQ's USA-CA): the 3,077 counties, by the contact's CNTY. Confirmed by
+ * the award's rule: a card, or an eQSL from an Authenticity-Guaranteed member. */
+export interface UsacaProgress {
+  worked: number
+  confirmed: number
+  total: number
+  /** The highest level reached (500, 1000 … 3077) and the next one. */
+  level: number | null
+  nextLevel: number | null
+  /** Contacts whose CNTY names no county of the award: left uncounted. */
+  unplaced: number
 }
 
 /** DXCC Honor Roll standing — current-entity, confirmed. (ARRL: confirmed ≥
@@ -3711,6 +3800,8 @@ export interface AwardSummary {
   ffma?: FfmaProgress
   /** IOTA — island groups worked / confirmed. */
   iota: IotaProgress
+  /** The US Counties award. Absent from an older station. */
+  usaca?: UsacaProgress
   /** Worked All Provinces (Canada). Absent from an older station. */
   wap?: WapProgress
   /** CQ WPX, DARC WAE and WWFF. Absent from a station older than them. */
@@ -4421,9 +4512,10 @@ export interface FdClubStatus {
   clubCode?: string
 }
 
-/** The host's club log, as its own screen lists it (`fdClubLogNewest`, Rust `FdClubLogDto`): how
- *  many contacts the club holds, and the newest of them, newest first. The HOST's alone, and its
- *  own screens': nothing of it rides the snapshot, so Remote is sent none of it. */
+/** The club log, as the host's own screen lists it (`fdClubLogNewest`, Rust `FdClubLogDto`): how
+ *  many contacts the club holds, and the newest of them, newest first. A joined laptop answers the
+ *  same list, as the host sent it over club sync. Nothing of it rides the snapshot, so Remote is sent
+ *  none of it. */
 export interface FdClubLog {
   /** Every contact in the club's log, duplicates included: the count the club line says. */
   total: number
@@ -4778,6 +4870,23 @@ export interface Settings {
   /** The JS8 events that play a sound (JS8Call's notifications, all off by default): cq, hb, ack,
    *  directed, inbox, callNew, callOld. */
   js8Sounds: string[]
+  /** JS8Call's "Reset the Band Activity, Call Activity, and RX history at startup" (off by
+   *  default): the cockpit starts each run with its three lists empty. Display only. */
+  js8ResetActivity: boolean
+  /** JS8Call's colours and fonts for the RX pane, the two lists and the compose box (empty by
+   *  default: every pane follows the theme). Colours by theme, then by element, each `#rrggbb`;
+   *  fonts by pane. Read through features/js8PaneStyle, which checks every entry. */
+  js8PaneStyle: {
+    light: Record<string, string>
+    dark: Record<string, string>
+    fonts: Record<string, { family: string; sizePt: number }>
+  }
+  /** The WAV file each of those plays, by event (JS8Call's notification paths). None, the default,
+   *  plays the built-in tone. Paths on this computer: the Remote page never has them. */
+  js8SoundFiles?: Record<string, string>
+  /** The output the JS8 sounds play on, by device name; empty or absent is the system default. A
+   *  device the station transmits from is refused at every play (VOX safety). */
+  js8SoundDevice?: string
   /** JS8Call's TCP API for programs on this computer: read-only, on 127.0.0.1 only. Off by
    * default, as in JS8Call. */
   js8ApiTcp?: boolean
@@ -4874,6 +4983,10 @@ export interface Settings {
   icomNativeCat: boolean
   /** Which Icom DATA mode to select for digital (1|2|3). 1 = today's behaviour. */
   icomDataMode: number
+  /** This radio's waterfall source where Nexus streams an Icom's own scope: 'auto' (the default,
+   * the radio's scope) or 'audio' (the sound card's audio waterfall; the scope stream stops and
+   * CI-V keeps serving CAT). Per radio (flat mirror of `RadioProfile.nativeScope`); absent = 'auto'. */
+  nativeScope?: string
   /** "Transmit audio source (CAT PTT)" (#381): 'front' keys as every release has (`T 1`, the MIC
    * input on most radios), 'rear' keys the DATA input (`T 3`). Offered only for CAT PTT on a radio
    * whose Hamlib driver has mic/data PTT (`getPttMicDataRigModels`). Per radio; absent = 'front'. */
@@ -4891,6 +5004,9 @@ export interface Settings {
   /** Hold the FM DATA submode for as long as the SSTV receiver is running, rather than only
    * around a send. Per radio (flat mirror of the active radio). Off by default. */
   sstvHoldDataSubmode: boolean
+  /** APRS in this radio's DATA-FM mode instead of plain FM (#393). Per radio, off by default;
+   * obeyed only on a radio that has one (`APRS_DATA_FM_MODELS`). */
+  aprsDataFm: boolean
   /** Antenna rotator: rotctld daemon `host:port` (empty = no rotator). */
   /** Integrated rotator: Hamlib rotator model # (0 = none) + serial port +
    * baud — Nexus launches the bundled rotctld itself, like the rig. */
@@ -5399,6 +5515,12 @@ export interface Settings {
   /** JTTY's F Tol, Hz (`jtty_ftol_hz`, WSJT-X's `JTTY_FTol`). The JTTY cockpit is its one
    *  writer, through `jtty_set_rx`; a form save keeps the live value. */
   jttyFtolHz?: number
+  /** JTTY's F1-F8 templates in WSJT-X's Contest style (`jtty_fkeys`, WSJT-X's `JTTY_msg1..8`) and
+   *  in its FT8 style (`jtty_ft8_fkeys`, `JTTY_FT8_msg1..8`), and which set the keys send
+   *  (`jtty_message_style`). The JTTY cockpit edits them, through the patch seam. */
+  jttyFkeys?: string[]
+  jttyFt8Fkeys?: string[]
+  jttyMessageStyle?: JttyMessageStyle
   /** The Keyboard section's modem (`keyboard_modem`): written by entering the PSK or JTTY
    *  cockpit, never by the form. */
   keyboardModem?: 'psk' | 'jtty'
@@ -5644,12 +5766,43 @@ export interface Settings {
   routingRules?: RoutingRule[]
   /** Fallback radio when no rule and no band coverage claims a (band, mode). Absent = stay put. */
   defaultRadio?: number | null
+  /** Whether a radio switch Nexus makes by itself is said on screen: `tell` (a notice with Undo,
+   *  a new install's default) or `act` (silent, what an existing settings file keeps). Not written
+   *  by a settings save: write it with `setRadioSwitchPolicy` (api.ts), its one writer. */
+  radioSwitchPolicy?: RadioSwitchPolicy
+  /** The first-run wizard's answer to "How much have you done?". Absent = never asked (an
+   *  existing station, or a skipped wizard), which behaves as every earlier build did. Not
+   *  written by a settings save: write it with `setExperienceLevel` (api.ts), its one writer. */
+  experienceLevel?: ExperienceLevel
+  /** Whether the first-run setup wizard was done (finished or skipped). `false` only on a new
+   *  install (there was no settings file); absent or `true` = an existing station, which the
+   *  wizard never opens for by itself. Write it with `markSetupWizardSeen` (api.ts), its one writer. */
+  setupWizardSeen?: boolean
 }
+
+/** Mirrors the Rust `ExperienceLevel`. */
+export type ExperienceLevel = 'newToHobby' | 'newToDigital' | 'experienced'
 
 /** The mode granularity radio routing decides on — a refinement of the app's CW/Phone/Digital
  * classes (FM and SSB are both Phone; digital and RTTY are both Digital). The refinement is what
  * makes "2 m FT8 to one rig, 2 m FM to another" expressible. Mirrors the Rust `RouteMode`. */
 export type RouteMode = 'digital' | 'fm' | 'ssb' | 'cw' | 'rtty'
+
+/** Mirrors the Rust `RadioSwitchPolicy`: `tell` = switch and say so with Undo, `act` = switch
+ *  silently. */
+export type RadioSwitchPolicy = 'act' | 'tell'
+
+/** One radio switch Nexus made BY ITSELF (the routing handed the band to another radio). Mirrors
+ *  the Rust `AutoRadioSwitch`; `seq` grows by one per switch. */
+export interface AutoRadioSwitch {
+  seq: number
+  /** The radio that was active before: what Undo selects again. */
+  fromId: number
+  toId: number
+  /** The band asked for ("2m"); empty for a dial off the band plan. */
+  band: string
+  mode: RouteMode
+}
 
 /** Non-mode context a routing rule can be DESIGNATED for instead of a mode class: satellite work.
  * A satellite rule is matched only by satellite-originated tunes (a transponder pick), at a tier
@@ -5713,6 +5866,9 @@ export interface RadioProfile {
    * call made without stopping it first is commanded in the data submode and modulates from
    * the data port, not the microphone. */
   sstvHoldDataSubmode: boolean
+  /** APRS in this radio's DATA-FM mode instead of plain FM (#393). Per radio, off by default;
+   * obeyed only on a radio that has one (`APRS_DATA_FM_MODELS`). */
+  aprsDataFm: boolean
   audioIn: string
   audioOut: string
   txLevel: number
@@ -5732,7 +5888,7 @@ export interface RadioProfile {
   lastDialMhz: number
   lastBand: string
   lastSideband: string
-  /** Native panadapter: "auto" | "none" | "flex" | "civ". */
+  /** Waterfall source where Nexus streams an Icom scope: "auto" (the radio's scope, default) or "audio". */
   nativeScope: string
   /** This radio's FlexRadio LAN IP (SmartSDR API :4992) — per-radio since 2026-08-18. */
   flexRadioIp?: string
@@ -5791,6 +5947,8 @@ export interface AppSnapshot {
   activeRadioId?: number
   /** Peg-lock: band selection won't auto-switch the active radio when true. */
   radioPegged?: boolean
+  /** The last radio switch Nexus made by itself this session (absent until one happens). */
+  autoRadioSwitch?: AutoRadioSwitch
   /** Mirror of Settings b4MatchMode — the B4/Dupe scope every surface applies. */
   b4MatchMode?: boolean
   /** AI CW decoder (beta): toggle state, status line, rolling stitched transcript. */
@@ -5824,6 +5982,10 @@ export interface AppSnapshot {
   /** Bumped every time a QSO is logged, by any path (backend auto-log included).
    * App fires the "clear DX call after logging" wipe on change. */
   loggedTick?: number
+  /** Bumped on every band change, by any route (a move within one band never bumps it). The
+   * cockpits clear their call boxes on change: the FT8/FT4 DX call and grid, the JS8 To box,
+   * the JTTY Call box and the log strip's un-logged call. */
+  bandChangeTick?: number
   /** Bumped on every change to the log by ANY writer — the shack, a Remote browser, another
    * instance, a connector stamp. The Logbook reloads its list on change. */
   logTick?: number
@@ -5854,7 +6016,8 @@ export interface AppSnapshot {
    * retransmissions). Drives the HARQ stats readout. */
   harqRescues: number
   /** A completed QSO awaiting confirm-before-log (WSJT-X "Prompt me to log
-   * QSO"). Present only with promptToLog on; drives the confirm popup. */
+   * QSO"). Present with promptToLog on, and whatever it says for a contact that may only be
+   * offered (our 73 after a click on the station's RR73 or RRR); drives the confirm popup. */
   pendingLog?: LoggedQso | null
   /** How many contacts have been logged WITHOUT the operator's confirmation since they last
    * answered the popup, because the confirm-before-log queue was full (the cap logs the
@@ -5874,6 +6037,9 @@ export interface AppSnapshot {
   /** How many MORE completed contacts are queued behind the one the popup shows (operator
    *  ruling 2026-09-19: queue them, never replace). 0 or absent = this is the only one. */
   pendingLogsWaiting?: number
+  /** How many finished contacts wait for Log QSO with Auto-log and the popup both off (ones a
+   *  click, Call CQ or a mode change replaced): the Log button shows the count. Absent/0 = none. */
+  logQsoWaiting?: number
   /** Last connector auto-upload outcome (QRZ/ClubLog/eQSL) from the backend
    * upload funnel; uploadTick bumps per outcome so the UI toasts it. */
   uploadNote?: string | null

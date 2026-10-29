@@ -88,6 +88,7 @@ import {
   startQsoRecording,
   stopQsoRecording,
   setTune,
+  atuBypass,
   atuTune,
   haltTx,
   setTxEnabled,
@@ -104,6 +105,7 @@ import {
   setSquelch,
   setFilterWidth,
   setRigFunc,
+  setTxBw,
   setAgc,
   setSidebandOverride,
 } from '../api'
@@ -260,6 +262,9 @@ interface Props {
   /** Enter Sends Message's switch for this cockpit and the voice keyer's step mapping (App, from
    *  Settings). Absent on the hosted page. */
   esmSetting?: EsmSetting
+  /** The active radio is a Flex on SmartSDR CAT or Hamlib (App, from Settings): the voice keyer
+   *  notes once that SSB goes out only with DAX on for voice. Absent on the hosted page. */
+  flexDaxNote?: boolean
   /** Contest mode is on but this station is out of the contest (App's: the switch on, the session not):
    *  the log line says so, with Resume, which re-enters the contest in S&P. Absent otherwise. */
   onResumeContest?: () => void
@@ -625,7 +630,7 @@ const FLEX_SPANS = [
  *  notch, the scope references and the scope's G and Z move one of their own steps. */
 const LEVEL_WHEEL_STEP = 2
 
-export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap, theme, pendingWork, onConsumeWork, onSnap, fieldDay, phoneMode, wheelSensitivity, spots, tciSpots, onTciSpot, needByCall, typeByCall, onWorkSpot, onRecallMemory, onOpenMemories, onOpenSettings, onOpenLogbook, onEntryCall, panels, spotsBoard, neededBoard, boxes }: Props) {
+export function PhoneCockpit({ esmSetting, flexDaxNote, onResumeContest, active = true, snap, theme, pendingWork, onConsumeWork, onSnap, fieldDay, phoneMode, wheelSensitivity, spots, tciSpots, onTciSpot, needByCall, typeByCall, onWorkSpot, onRecallMemory, onOpenMemories, onOpenSettings, onOpenLogbook, onEntryCall, panels, spotsBoard, neededBoard, boxes }: Props) {
   // Live S-meter (shared 100 ms poll, lock-free backend) — used to arrive via the 300 ms
   // snapshot on top of the backend's own sampling, which read as a laggy needle. smeterDb-only
   // subscription: the cockpit re-renders when the S-meter changes, never on RX-level churn.
@@ -920,11 +925,9 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
   const lastPoW = useRef<number | null>(null)
   const scopeRef = useRef<HTMLDivElement>(null)
   // The scope strip its height divider sizes: the divider sets its CSS var on the strip's
-  // parent (the stage, which has no box until the left side shows — then the shell is the
-  // container) and measures the range the layout honours (on a short window the pane region's
-  // floor stops the strip below its own max-height). The stored height is a share of the shell.
+  // parent (the shell) and measures the range the layout honours (on a short window the pane
+  // region's floor stops the strip below its own max-height).
   const scopePanelRef = useRef<HTMLElement>(null)
-  const scopeShareOf = () => scopePanelRef.current?.closest<HTMLElement>('main.phone-cockpit') ?? null
   useWheelTune(scopeRef, {
     dialMhz: snap.radio.dialMhz,
     sideband: snap.radio.sideband || 'USB',
@@ -1591,7 +1594,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
           stats: hasStatsPane,
         })[id as string] ?? false)
   // ── THE LEFT SIDE (operator's pick, 2026-10-03: ⊞ Arrange's "Left side") ───────────────────────
-  // A full-height column beside the scope, the TX strip and the region, between the header and the
+  // A column beside the region, under the full-width scope and TX strip (2026-10-26), above the
   // dock, for the panes the operator put there (the record's `leftSide`: Band Activity, Spots, Needed —
   // PHONE_PANELS.arrange.leftSide, so never the keyer or the log form). It has ROOM on a window at least
   // about 1280 effective px wide, read from the published `--vw-eff` (never a size @media), and never in
@@ -1601,7 +1604,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
   const sideRoom = sideWide && panels != null
   const sideIds = sideRoom ? (panels?.layout.leftSide ?? []) : []
   // What the side renders, top to bottom. With nothing on it shown it is not drawn at all — an empty
-  // column beside the scope is the "band of empty black" by another name.
+  // column beside the region is the "band of empty black" by another name.
   const sideGroup = sideIds.filter(paneShown)
   const sideShows = sideGroup.length > 0
   // The panes IN THE REGION: shown, and not on the left side.
@@ -1719,6 +1722,24 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
   // fallback), BW is drivable now (CAT up, never FM), the rig is not in a DATA mode (that filter is
   // FT8's), and this window is the station's own (the Remote page's scope is click-only). Held, like
   // tuning, while anything transmits — the rig's own PTT included.
+  // The TX meters' COMP row sets what the chain's COMP controls set, through the same verbs and
+  // under the same capability verdicts: a control dead or hidden in the chain is not offered on
+  // the meter either. The transmit-bandwidth step has no chain twin; TxMeters shows it only once
+  // the radio has read one back.
+  const txMeterControls = {
+    onCompLevel: show('COMPLVL') && !dead('COMPLVL') ? (frac: number) => changeComp(Math.round(frac * 100)) : undefined,
+    onProc:
+      show('COMP') && !dead('COMP')
+        ? (on: boolean) =>
+            void setRigFunc('comp', on)
+              .then((s) => s && onSnap?.(s))
+              .catch(() => pushToast(t('phone.dsp.toggleFailed', { func: COMP }), 'error'))
+        : undefined,
+    onTxBw: (step: string) =>
+      void setTxBw(step)
+        .then((s) => s && onSnap?.(s))
+        .catch((error) => pushToast(String(error), 'error')),
+  }
   const passbandEditable =
     !dead('BW') && (filterHz ?? 0) > 0 && !rigMode.startsWith('PKT')
   const onScopePassband = useScopePassband({
@@ -1963,6 +1984,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
         keyed={keyed}
         voicePlaying={snap.radio.voicePlaying}
         fdExchange={fdExchange}
+        flexDaxNote={flexDaxNote}
         esm={{
           lit: esmLitKeys(esm.preview),
           report: setKeyerForEnter,
@@ -2545,6 +2567,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
           card scrolls inside the log column and can never squeeze the cockpit — the operator
           gets the QRZ photo / bearing / history back while operating. */}
       <LogEntry
+        clearCallOnBandChange
         onOpenLogbook={onOpenLogbook}
         onEntryCall={(c) => {
           setStatsCall(c)
@@ -2650,6 +2673,11 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
       }
       onAtuTune={() =>
         void atuTune()
+          .then((s) => onSnap?.(s))
+          .catch((e) => pushToast(String(e), 'error'))
+      }
+      onAtuBypass={() =>
+        void atuBypass()
           .then((s) => onSnap?.(s))
           .catch((e) => pushToast(String(e), 'error'))
       }
@@ -2879,7 +2907,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
           unchanged — header, scope, ONE pane region, TX dock — one of the four is simply
           conditional now, exactly as Operate's waterfall has been since 0.15.0. The gate is
           HERE, at the shell child, and not inside the section: a scope that rendered an empty
-          `.ph-scope-panel` would keep its `flex: 0 1 22%` basis and its 8em floor and hand the
+          `.ph-scope-panel` would keep its `flex: 0 1 25%` basis and its 8em floor and hand the
           operator back a bordered empty box instead of the height he asked to reclaim.
           `.cockpit-panes` is `flex: 1 1 0` (cockpit-panes.css) — the region IS the sink, so
           the freed height goes to the panes with no rule change.
@@ -2888,37 +2916,14 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
           own it is a grab handle for something that is not there — and it is a shell child of
           its own, which would leave a stranded 8px seam between the header and the region.
           The var it wrote is untouched and still stored, so re-ticking restores the height he
-          dragged to rather than the 22% default.
+          dragged to rather than the 25% default.
 
           Nothing on this strip stops a transmission (THE STOP LINE, features/panelState.ts):
           it is a display plus click-to-tune, and Stop TX / Tune are in the TX strip below it, PTT in
           the dock below, none of them reachable from the ⊞ menu. */}
-      {/* THE LEFT SIDE'S ROW AND THE STAGE (2026-10-03, cockpit-panes.css "THE LEFT SIDE"). The scope,
-          its divider, the TX strip and the pane region ALWAYS render inside these two wrappers, so the
-          side showing or going (a window crossing about 1280 px, a pane moved in ⊞ Arrange) never
-          moves the voice keyer or the log form to a new parent — React would remount both, stopping
-          an over and losing a half-typed contact. Until the side shows both are `cockpit-flat`, with
-          no box at all: the scope, the strip and the region are then the shell's flex items exactly as
-          before, which is what keeps the strip's sticky edges measured against the shell. With the
-          side shown the row lays it beside the stage. The header above and the TX dock below never
-          enter either, so PTT and the dock never move; Stop TX and Tune ride the strip under the scope. */}
-      <div className={sideShows ? 'cockpit-leftrow' : 'cockpit-flat'}>
-      {sideShows && panels && (
-        <LeftSide
-          stored={panels.layout.cols?.leftSide}
-          setCols={panels.setCols}
-          label={t('pane.left.label')}
-          widthLabel={t('pane.seam.leftWidth.label')}
-          colRef={sideColRef}
-        >
-          {sideGroup.map(placedPane)}
-          <PaneDropLayer drag={paneDrag} host={sideColRef} />
-        </LeftSide>
-      )}
-      <div className={sideShows ? 'cockpit-stage' : 'cockpit-flat'}>
       {shown('scope') && (
         <>
-      <section className={`ph-scope-panel${sideShows ? ' ph-scope-panel--beside' : ''}`} ref={scopePanelRef}>
+      <section className="ph-scope-panel" ref={scopePanelRef}>
         <div className="ph-scope-head">
           {(() => {
             // Honest per feed: soundcard FFT = the demodulated RX audio; a native
@@ -3051,16 +3056,11 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
         axis="y"
         varName="--ph-scope-h"
         strip={scopePanelRef}
-        // In the stage, not a direct shell child: it gives back its column's gap as every divider
-        // whose parent styles.css may not name does (styles.css `.pane-splitter.horizontal.in-column`).
-        className="in-column"
-        // The stored height is a share of the SHELL in both states, so the left side showing narrows
-        // the scope without shortening it, and the TX strip under it stays at the same height.
-        shareOf={scopeShareOf}
         storageKey="nexus.split.phone.scope"
         min={SCOPE_SPLIT_MIN}
         max={SCOPE_SPLIT_MAX}
-        defaultPct={22}
+        // 25 % of the shell, every cockpit's waterfall default (2026-10-26); a dragged height is kept.
+        defaultPct={25}
         label={t('phone.scope.splitter.label')}
       />
         </>
@@ -3068,6 +3068,31 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
 
       {/* THE TX STRIP (`txStrip` above), under the scope. */}
       {txStrip}
+
+      {/* THE LEFT SIDE'S ROW AND THE STAGE (2026-10-03, cockpit-panes.css "THE LEFT SIDE"). The pane
+          region ALWAYS renders inside these two wrappers, so the side showing or going (a window crossing
+          about 1280 px, a pane moved in ⊞ Arrange) never moves the voice keyer or the log form to a new
+          parent — React would remount both, stopping an over and losing a half-typed contact. Until the
+          side shows both are `cockpit-flat`, with no box at all: the region is then the shell's flex item
+          exactly as before. With the side shown the row lays it beside the stage. The scope, its divider
+          and the TX strip stand ABOVE the row as shell children in both states (2026-10-26: "width and
+          height to be consistent"), so the scope keeps the shell's full width and its parent never
+          changes, and the side starts under the TX strip. The header above and the TX dock below never
+          enter the row either, so PTT and the dock never move. */}
+      <div className={sideShows ? 'cockpit-leftrow' : 'cockpit-flat'}>
+      {sideShows && panels && (
+        <LeftSide
+          stored={panels.layout.cols?.leftSide}
+          setCols={panels.setCols}
+          label={t('pane.left.label')}
+          widthLabel={t('pane.seam.leftWidth.label')}
+          colRef={sideColRef}
+        >
+          {sideGroup.map(placedPane)}
+          <PaneDropLayer drag={paneDrag} host={sideColRef} />
+        </LeftSide>
+      )}
+      <div className={sideShows ? 'cockpit-stage' : 'cockpit-flat'}>
 
       {/* THE PANE REGION — one CockpitPaneFrame grid for every operator-content block.
           useRegionCols OWNS data-cols (measured from the region itself, stamped
@@ -3278,7 +3303,7 @@ export function PhoneCockpit({ esmSetting, onResumeContest, active = true, snap,
         )}
       </div>
 
-      {shown('txmeters') && <TxMeters radio={snap.radio} pinned />}
+      {shown('txmeters') && <TxMeters radio={snap.radio} pinned controls={txMeterControls} />}
 
       {/* ⚠️ NOTHING IN THIS ROW IS MIGRATED, and that is the whole of why this file is on the
           i18n PARTIAL list. PTT is Phone's stop-line census (features/panelState.ts) and

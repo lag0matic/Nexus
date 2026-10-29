@@ -47,6 +47,7 @@ pub mod station;
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_util;
 pub mod update;
+pub mod upload_start;
 pub mod watchlist;
 pub mod window_geometry;
 pub mod winlink;
@@ -281,6 +282,8 @@ impl AppState {
                 band: "20m".to_string(),
                 sideband: "USB".to_string(),
                 operating_mode: "digital".to_string(),
+                // The engine fills it from the Keyboard section's modem every snapshot.
+                keyboard_mode: String::new(),
                 rig_keyed: false,
                 hrd_link_up: None,
                 hrd_queued: 0,
@@ -321,6 +324,11 @@ impl AppState {
                 tx_alc_zone: None,
                 tx_po_w: None,
                 tx_comp_db: None,
+                pa_temp_c: None,
+                pa_temp_meter: None,
+                tx_bw_steps: Vec::new(),
+                tx_bw: None,
+                tx_proc_switch: false,
                 swr_scale_verified: false,
                 rig_mode: None, // engine fills from CAT mode read-back (display-only)
                 sideband_override: None, // engine fills from the cockpit mode picker (transient)
@@ -339,6 +347,7 @@ impl AppState {
                 tuner_switch_supported: false,
                 atu: None, // engine fills from the CAT TUNER probe (None = no ATU on this rig)
                 atu_start_tune_unsupported: false, // …and with it, whether it can be STARTED
+                atu_switch_out: false, // …and whether it can be switched out
                 filter_width_hz: None, // engine fills from the CAT `m` passband read-back
                 rit_hz: 0,
                 xit_hz: 0,
@@ -374,6 +383,7 @@ impl AppState {
                 audio_error: None,
                 audio_error_kind: None,
                 cat_share_error: None,
+                cat_share_port: None,
                 tci_server: None,
                 scope_error: None,
                 scope_span_refused: None,
@@ -1019,6 +1029,7 @@ impl AppState {
             radios: Vec::new(),
             active_radio_id: 0,
             radio_pegged: false,
+            auto_radio_switch: None,
             b4_match_mode: false,
             link: self.link.clone(),
             chat_cq: String::new(), // Engine fills the run state in snapshot()
@@ -1043,6 +1054,7 @@ impl AppState {
             udp_free_text: None,
             rx_freq_clear_tick: 0,
             logged_tick: 0,
+            band_change_tick: 0,
             hunt: None,
             activation: None,
             // Filled by the engine while coordinated QSY is enabled; None here.
@@ -1053,6 +1065,7 @@ impl AppState {
             pending_log: None,
             pending_qso_log_key: None,
             pending_logs_waiting: 0,
+            log_qso_waiting: 0,
             pending_logs_auto_logged: 0,
             // Filled by the engine from its last connector-upload note; empty here.
             upload_note: None,

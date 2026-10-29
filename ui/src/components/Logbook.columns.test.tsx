@@ -14,9 +14,9 @@ import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
 import { render, waitFor, fireEvent, screen, cleanup, within } from '@testing-library/react'
 import { Logbook } from './Logbook'
 import * as api from '../api'
+import { announce } from '../announce'
 import type { LogQuestion } from '../features/logAnswers'
 import type { LogColumnsSaved } from '../features/logColumns'
-import { logSource } from '../features/logSource'
 
 beforeAll(() => {
   globalThis.ResizeObserver = class {
@@ -46,6 +46,7 @@ vi.mock('../api', () => {
     longwavePushQso: vi.fn(),
   }
 })
+vi.mock('../announce', () => ({ announce: vi.fn() }))
 vi.mock('../toast', () => ({
   pushToast: vi.fn(),
   withErrorToast: vi.fn((run: () => Promise<unknown>) => run()),
@@ -69,8 +70,8 @@ const CONTACT = {
 }
 
 async function renderLog(props: { columns?: LogColumnsSaved | null; onColumnsChange?: (c: LogColumnsSaved | null) => void;
-  longwave?: { longwaveUrl: string; longwaveLogbookId: string } } = {}) {
-  engineLog.mockResolvedValue([CONTACT])
+  longwave?: { longwaveUrl: string; longwaveLogbookId: string } } = {}, initialRows: unknown[] = [CONTACT]) {
+  engineLog.mockResolvedValue(initialRows)
   const utils = render(<Logbook defaultBand="20m" defaultFreqMhz={14.074} defaultMode="FT8" {...props} />)
   await waitFor(() => expect(utils.container.querySelector('.logbook-row:not(.head):not(.placeholder)')).not.toBeNull())
   return utils
@@ -97,10 +98,8 @@ afterEach(() => {
 
 describe('the default table is the one the Logbook had', () => {
   it('refreshes the open detail stamp after an upload command rejects', async () => {
-    const { container } = await renderLog({ longwave: { longwaveUrl: 'https://log.example.invalid', longwaveLogbookId: 'saved-book' } })
     const unsent = { ...CONTACT, upload: { longwave: null } }
-    engineLog.mockResolvedValue([unsent])
-    logSource().refresh()
+    const { container } = await renderLog({ longwave: { longwaveUrl: 'https://log.example.invalid', longwaveLogbookId: 'saved-book' } }, [unsent])
     fireEvent.doubleClick(row(container))
     const push = await screen.findByRole('button', { name: 'Upload to Longwave' }) as HTMLButtonElement
     await waitFor(() => expect(push.disabled).toBe(false))
@@ -110,7 +109,8 @@ describe('the default table is the one the Logbook had', () => {
     })
     fireEvent.click(push)
     await waitFor(() => expect(screen.getByText(/^Refused/)).toBeTruthy())
-    await waitFor(() => expect(push.disabled).toBe(false))
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Upload to Longwave' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(document.body.contains(push)).toBe(false)
     expect(api.longwavePushQso).toHaveBeenCalledTimes(1)
   })
 
@@ -146,7 +146,7 @@ describe('the default table is the one the Logbook had', () => {
     document.documentElement.setAttribute('data-viewport', 'sm')
     const { container } = await renderLog()
     expect(headers()).toEqual(['Call', 'Country', 'Band', 'QSL', 'Notes', 'Edit / delete'])
-    expect(template(container)).toBe('1fr 1.3fr 0.7fr 0.7fr 1fr minmax(384px, 0.8fr)')
+    expect(template(container)).toBe('1fr 1.3fr 0.7fr 0.7fr 1fr minmax(436px, 0.8fr)')
     expect(row(container).querySelectorAll(':scope > .log-cell')).toHaveLength(6)
   })
 })
@@ -188,13 +188,29 @@ describe('the added columns show what the store holds', () => {
     expect(table(container).style.getPropertyValue('--log-min-w')).toMatch(/rem$/)
   })
 
-  it('an added column sorts only where the engine can order it: its header is a button or not', async () => {
-    await renderLog({ columns: ALL_ADDED })
-    const header = (name: string) => screen.getAllByRole('columnheader').find((x) => x.textContent?.startsWith(name))
-    // A passthrough tag with no index does not sort; the county, which the store indexes, does.
-    expect(header('CQ zone')?.tagName).toBe('SPAN')
-    expect(header('County')?.tagName).toBe('BUTTON')
-    expect(screen.getByRole('columnheader', { name: 'Call' }).tagName).toBe('BUTTON')
+  it('every column but the actions sorts: its header is a button, and a click asks the engine for that order', async () => {
+    const MORE = ['end', 'myGrid', 'myRig', 'name', 'qth', 'state', 'power', 'operator']
+    await renderLog({ columns: { ...ALL_ADDED, shown: [...ALL_ADDED.shown, ...MORE] } })
+    const all = screen.getAllByRole('columnheader')
+    const buttons = all.filter((h) => h.tagName === 'BUTTON')
+    // Every column is shown, including Longwave; only the action cluster has no order.
+    expect(all).toHaveLength(40)
+    expect(buttons).toHaveLength(39)
+    expect(all.filter((h) => h.tagName !== 'BUTTON').map((h) => h.getAttribute('aria-label'))).toEqual(['Edit / delete'])
+    const header = (name: string) => all.find((x) => x.textContent?.startsWith(name)) as HTMLElement
+    const asked = () => vi.mocked(api.askLog).mock.calls.map(([q]) => q).filter((q) => q.kind === 'page').slice(-1)[0]
+    // The end time opens newest first; a click again flips it.
+    fireEvent.click(header('End'))
+    await waitFor(() => expect(asked()).toMatchObject({ query: { sort: 'end', asc: false } }))
+    expect(header('End').getAttribute('aria-sort')).toBe('descending')
+    fireEvent.click(header('Longwave upload'))
+    await waitFor(() => expect(asked()).toMatchObject({ query: { sort: 'upLongwave', asc: true } }))
+    fireEvent.click(header('End'))
+    fireEvent.click(header('End'))
+    await waitFor(() => expect(asked()).toMatchObject({ query: { sort: 'end', asc: true } }))
+    // Shift adds a second key: the CQ zone, ascending.
+    fireEvent.click(header('CQ zone'), { shiftKey: true })
+    await waitFor(() => expect(asked()).toMatchObject({ query: { sort: 'end', asc: true, then: [{ sort: 'cqz', asc: true }] } }))
   })
 })
 
@@ -251,6 +267,142 @@ describe('resize', () => {
     expect(saved).toHaveBeenCalledTimes(1)
     expect(saved).toHaveBeenLastCalledWith({ shown: [], hidden: [], widths: { country: 180 } })
     expect(header.getAttribute('aria-sort'), 'the click that ends a drag must not sort').toBe('none')
+  })
+})
+
+describe('move', () => {
+  /** jsdom lays nothing out: give each header cell a 100 px slot by its place in the header row. */
+  function layHeaders() {
+    return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const i = this.dataset.col ? [...this.parentElement!.children].indexOf(this) : -1
+      const left = i < 0 ? 0 : i * 100
+      const width = i < 0 ? 0 : 100
+      return { left, right: left + width, width, x: left, top: 0, bottom: width ? 20 : 0, height: width ? 20 : 0, y: 0, toJSON() {} } as DOMRect
+    })
+  }
+  const DEFAULT_HEADERS = ['Call', 'Country', 'Band', 'Freq', 'Mode', 'Sent', 'Rcvd', 'Date (UTC)', 'Time (UTC)', 'Park', 'QSL', 'Notes', 'Edit / delete']
+
+  it('dragging a header onto another moves the column, saves the order once, and does not sort', async () => {
+    const rects = layHeaders()
+    try {
+      const saved = vi.fn()
+      await renderLog({ onColumnsChange: saved })
+      expect(headers()).toEqual(DEFAULT_HEADERS)
+      const notes = screen.getByRole('columnheader', { name: 'Notes' })
+      // Notes (slot 11) dragged onto Country's left half (slot 1: 100–200).
+      fireEvent.pointerDown(notes, { button: 0, clientX: 1150, clientY: 10, pointerId: 1 })
+      fireEvent.pointerMove(notes, { clientX: 700, clientY: 10, pointerId: 1 })
+      fireEvent.pointerMove(notes, { clientX: 120, clientY: 10, pointerId: 1 })
+      expect(saved).not.toHaveBeenCalled()
+      fireEvent.pointerUp(notes, { clientX: 120, clientY: 10, pointerId: 1 })
+      // A pointer's click carries its click count (detail 1); a keyboard's Enter/Space click carries 0.
+      fireEvent.click(notes, { detail: 1 })
+      expect(headers()).toEqual(['Call', 'Notes', 'Country', 'Band', 'Freq', 'Mode', 'Sent', 'Rcvd', 'Date (UTC)', 'Time (UTC)', 'Park', 'QSL', 'Edit / delete'])
+      expect(saved).toHaveBeenCalledTimes(1)
+      const order = saved.mock.calls[0][0].order as string[]
+      expect(order.slice(0, 3)).toEqual(['call', 'notes', 'country'])
+      expect(screen.getByRole('columnheader', { name: 'Notes' }).getAttribute('aria-sort'), 'the click that ends a drag must not sort').toBe('none')
+      // The rows follow the header: the second cell of a row is now the notes cell.
+      expect(announce).toHaveBeenCalledWith('Notes moved to place 2 of 13')
+    } finally {
+      rects.mockRestore()
+    }
+  })
+
+  it('a click with no travel still sorts', async () => {
+    const rects = layHeaders()
+    try {
+      const saved = vi.fn()
+      await renderLog({ onColumnsChange: saved })
+      const country = screen.getByRole('columnheader', { name: 'Country' })
+      fireEvent.pointerDown(country, { button: 0, clientX: 150, clientY: 10, pointerId: 1 })
+      fireEvent.pointerMove(country, { clientX: 152, clientY: 11, pointerId: 1 })
+      fireEvent.pointerUp(country, { clientX: 152, clientY: 11, pointerId: 1 })
+      fireEvent.click(country, { detail: 1 })
+      expect(saved).not.toHaveBeenCalled()
+      expect(headers()).toEqual(DEFAULT_HEADERS)
+      expect(screen.getByRole('columnheader', { name: /^Country/ }).getAttribute('aria-sort')).toBe('ascending')
+    } finally {
+      rects.mockRestore()
+    }
+  })
+
+  it('a drag that ends with no click on the header does not swallow the next Enter or Space sort', async () => {
+    const rects = layHeaders()
+    try {
+      await renderLog({ onColumnsChange: vi.fn() })
+      const notes = screen.getByRole('columnheader', { name: 'Notes' })
+      fireEvent.pointerDown(notes, { button: 0, clientX: 1150, clientY: 10, pointerId: 1 })
+      fireEvent.pointerMove(notes, { clientX: 120, clientY: 10, pointerId: 1 })
+      // Released outside the header (or the window): the browser sends no click to it.
+      fireEvent.pointerUp(notes, { clientX: 120, clientY: 10, pointerId: 1 })
+      expect(headers().slice(0, 2)).toEqual(['Call', 'Notes'])
+      // Enter or Space on a focused header is a click with detail 0 and no pointerdown before it.
+      const country = screen.getByRole('columnheader', { name: 'Country' })
+      fireEvent.click(country, { detail: 0 })
+      expect(screen.getByRole('columnheader', { name: /^Country/ }).getAttribute('aria-sort'), 'the keyboard sort must not be swallowed').toBe('ascending')
+    } finally {
+      rects.mockRestore()
+    }
+  })
+
+  it('a keyboard move scrolls the moved header into view inside the table', async () => {
+    const scrolled: { el: Element; arg: unknown }[] = []
+    const proto = HTMLElement.prototype as unknown as { scrollIntoView?: (arg?: unknown) => void }
+    const had = proto.scrollIntoView
+    proto.scrollIntoView = function (this: Element, arg?: unknown) {
+      scrolled.push({ el: this, arg })
+    }
+    try {
+      await renderLog({ onColumnsChange: vi.fn() })
+      screen.getByRole('columnheader', { name: 'Country' }).focus()
+      scrolled.length = 0
+      fireEvent.keyDown(screen.getByRole('columnheader', { name: 'Country' }), { key: 'ArrowRight', altKey: true, shiftKey: true })
+      const country = screen.getByRole('columnheader', { name: 'Country' })
+      expect(document.activeElement).toBe(country)
+      expect(scrolled.filter((s) => s.el === country).map((s) => s.arg)).toEqual([{ block: 'nearest', inline: 'nearest' }])
+    } finally {
+      if (had) proto.scrollIntoView = had
+      else delete proto.scrollIntoView
+    }
+  })
+
+  it('Alt+Shift+← and → on a focused header move its column a place, save, and say where it went', async () => {
+    const saved = vi.fn()
+    await renderLog({ onColumnsChange: saved })
+    screen.getByRole('columnheader', { name: 'Country' }).focus()
+    fireEvent.keyDown(screen.getByRole('columnheader', { name: 'Country' }), { key: 'ArrowRight', altKey: true, shiftKey: true })
+    expect(headers().slice(0, 3)).toEqual(['Call', 'Band', 'Country'])
+    expect(saved).toHaveBeenCalledTimes(1)
+    // A move is not a resize: no width was saved.
+    expect(saved.mock.calls[0][0].widths).toEqual({})
+    expect(announce).toHaveBeenLastCalledWith('Country moved to place 3 of 13')
+    // The header keeps the focus it had, so the next press carries on.
+    expect(document.activeElement).toBe(screen.getByRole('columnheader', { name: 'Country' }))
+    fireEvent.keyDown(screen.getByRole('columnheader', { name: 'Country' }), { key: 'ArrowLeft', altKey: true, shiftKey: true })
+    expect(headers()).toEqual(DEFAULT_HEADERS)
+    // Back where it began: nothing but the default table is saved.
+    expect(saved).toHaveBeenLastCalledWith({ shown: [], hidden: [], widths: {} })
+    // At the first place it goes no further, and says so.
+    saved.mockClear()
+    fireEvent.keyDown(screen.getByRole('columnheader', { name: 'Call' }), { key: 'ArrowLeft', altKey: true, shiftKey: true })
+    expect(saved).not.toHaveBeenCalled()
+    expect(announce).toHaveBeenLastCalledWith('Call is already the first column')
+  })
+
+  it('a saved order loads in that order, and Reset puts the default order back', async () => {
+    const saved = vi.fn()
+    await renderLog({ columns: { shown: [], hidden: [], widths: {}, order: ['notes', 'call'] }, onColumnsChange: saved })
+    expect(headers().slice(0, 3)).toEqual(['Notes', 'Call', 'Country'])
+    const menu = await openChooser()
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Reset to the default columns' }))
+    expect(saved).toHaveBeenLastCalledWith(null)
+    expect(headers()).toEqual(DEFAULT_HEADERS)
+  })
+
+  it('an old saved choice with no order shows the table it always did', async () => {
+    await renderLog({ columns: { shown: ['iota'], hidden: ['freq'], widths: {} } })
+    expect(headers()).toEqual(['Call', 'Country', 'Band', 'Mode', 'Sent', 'Rcvd', 'Date (UTC)', 'Time (UTC)', 'Park', 'QSL', 'IOTA', 'Notes', 'Edit / delete'])
   })
 })
 

@@ -16,7 +16,7 @@ import type {
   Settings,
 } from '../types'
 import { openContestLogger } from '../features/contestLoggerLayout'
-import { contestClear, contestMergeUnmerged, contestRemoveLast, contestRemoved, contestRestore, contestUnmerged, exportLog, fdClubAllowBack, fdClubExport, fdClubGivePosition, fdClubLogNewest, fdClubRemovePosition, fdMergeToGeneral, fdSetUpload, getFdRuleset, getSettings, setFdOperator, openPanelWindow, saveTextToDownloads, type ContestUnmerged, type FdGiveAnswer, type FdRemoveAnswer, type FdRulesetDto, type RemovedContest } from '../api'
+import { contestClear, contestMergeUnmerged, contestRemoveLast, contestRemoved, contestRestore, contestUnmerged, exportLog, fdClubAllowBack, fdClubExport, fdClubGivePosition, fdClubImport, fdClubLogNewest, fdClubRemovePosition, fdMergeToGeneral, fdSetUpload, getFdRuleset, getSettings, setFdOperator, openPanelWindow, saveTextToDownloads, type ContestUnmerged, type FdClubImport, type FdGiveAnswer, type FdRemoveAnswer, type FdRulesetDto, type RemovedContest } from '../api'
 import { isStreamInput } from '../remote-native/stream-input'
 import { drivesAnotherStation } from '../features/durableStore'
 import { patchSettings } from '../settings/patch'
@@ -42,7 +42,7 @@ import { contestRate, RATE_WINDOWS } from '../features/contestRate'
 import { bandRank, operatorSummaryLines } from '../features/contestOperators'
 import { formatOpTime, OFF_TIME_MIN_SEC, offTimeRule, operatingTime } from '../features/contestOpTime'
 import { OperatorStatsBoard } from './ContestOperators'
-import { stationMode, usePskName } from '../features/contestMode'
+import { stationMode, useKeyboardMode } from '../features/contestMode'
 import { CLEAR_TOAST_MS, REMOVE_CONFIRM_MS, SERVICE_NAMES, clearText, contactCount, contactLabel, newestContact, removalText, restoreText, utcHhmm } from '../features/contestRemoval'
 import { ContestContactEdit, focusOpenContestEdit, type EditNote } from './ContestContactEdit'
 import { ContestSpotMe } from './ContestSpotMe'
@@ -69,7 +69,7 @@ import { modeClassOf } from '../features/needs'
 import { CONTEST_LOG_MAX_SHARE, CONTEST_LOG_SPLIT_MAX, CONTEST_LOG_SPLIT_MIN } from '../features/paneSeam'
 import { PaneSeam } from './PaneSeam'
 import { UtcClock } from './UtcClock'
-import { askMainToWorkIn, dismissWorkInHint, workInHintSeen, type WorkInView } from '../features/contestWorkIn'
+import { askMainToWorkIn, dismissWorkInHint, workInHintSeen, workInLabel, workInTitle, workInViewsFor, type WorkInView } from '../features/contestWorkIn'
 import { useFeatures } from '../useFeatures'
 import { upperTyped } from '../typedInput'
 
@@ -204,6 +204,9 @@ interface Props {
    *  the others (`stationMode`) — so a station on phone at a contest that bans FT8 is not told FT8 is
    *  not permitted. Absent (the Remote page, whose observation carries no section), it reads `tier`. */
   section?: string
+  /** The Keyboard section's mode on the air (`snap.radio.keyboardMode`: PSK31, QPSK31 or JTTY), which
+   *  the chip names on that section: PSK and JTTY are one section, so `section` cannot say which. */
+  keyboardMode?: string
   /** Open Settings at a section (App's `openSettingsAt`): where the mode switch sends an
    *  operator whose contest cannot start yet. */
   onOpenSettings?: (target: string) => void
@@ -1830,7 +1833,7 @@ export interface ClubLogColumns {
 const CLUB_LOG_READ_MS = 2000
 
 /**
- * ⭐ THE CLUB LOG, ON THE HOST'S OWN SCREEN: every position's contacts as this host merged them,
+ * ⭐ THE CLUB LOG, ON THE HOST'S SCREEN AND EVERY LAPTOP'S: every position's contacts as this host merged them,
  * newest first, with the position that logged each, so the host can watch them arrive (the operator,
  * benching two laptops: "I can see the number on the board on the host computer here but it doesnt
  * show in the host master log").
@@ -1841,8 +1844,10 @@ const CLUB_LOG_READ_MS = 2000
  * files' own, drawn by the row this station's own log is drawn by, so it is marked as a dupe is there.
  * Each position is named as its line on the board above names it. Read-only: nothing here is pressed.
  *
- * The host's alone (`FdClubSection`'s `clubLog`): a joined laptop holds no rows, and Remote's page is
- * sent none of them.
+ * ⭐ On every joined laptop too, as every station of a networked club sees the combined log: the host
+ * sends each laptop this same list over club sync, and the laptop's engine answers it from what the host
+ * sent (`ClubMirror::list`), so a laptop lists exactly what the host's own screen lists. View only: a
+ * laptop still takes back only its own contacts, from its own log. Remote's page is sent none of it.
  */
 function ClubLogList({
   club,
@@ -1879,7 +1884,10 @@ function ClubLogList({
   const slotColumns = fieldDay ? [] : columns.receives
   return (
     <div className={big ? 'fd-log fd-club-log-big' : 'fd-log'} role="region" aria-label={t('fieldDay.club.log.head')}>
-      <div style={{ ...CLUB_HEADER, gap: 8, fontSize: textPx(big ? 15 : 12) }} title={t('fieldDay.club.log.title')}>
+      <div
+        style={{ ...CLUB_HEADER, gap: 8, fontSize: textPx(big ? 15 : 12) }}
+        title={club.hosting ? t('fieldDay.club.log.title') : t('fieldDay.club.log.title.joined')}
+      >
         <span style={{ fontWeight: 700, color: 'var(--text)' }}>{t('fieldDay.club.log.head')}</span>
         <span style={{ color: 'var(--text-dim)' }}>
           {log.total > log.rows.length
@@ -1916,6 +1924,7 @@ export function FdClubSection({
   onGivePosition,
   onRemovePosition,
   onAllowBack,
+  onImport,
   busy = false,
   detached = false,
   readOnly = false,
@@ -1938,6 +1947,9 @@ export function FdClubSection({
    *  that applies, but the host's own. */
   onRemovePosition?: (posid: string) => Promise<FdRemoveAnswer>
   onAllowBack?: (posid: string) => Promise<FdRemoveAnswer>
+  /** The host's own contest screen only, as `onGivePosition` is: merge a laptop's contest file
+   *  into the club's log as from position `posid`. */
+  onImport?: (text: string, posid: string) => Promise<FdClubImport>
   busy?: boolean
   detached?: boolean
   readOnly?: boolean
@@ -1958,10 +1970,10 @@ export function FdClubSection({
   /** This laptop's own position id (`Settings.fdPositionId`), whose name the grid marks as this
    *  laptop on a position's board. Not on Remote, which is no laptop of the club's. */
   ownPosid?: string
-  /** ⭐ The host's club log under the board (`ClubLogList`), and the log table's columns of the
-   *  contest the club runs: the host's contest screen and its club board's own window pass it. Not
-   *  Remote's contest view, whose page is sent none of the club's rows, and shown only while this
-   *  laptop hosts: a joined laptop holds the club's counts and keys, never its rows. */
+  /** ⭐ The club log under the board (`ClubLogList`), and the log table's columns of the contest the
+   *  club runs: the contest screen and its club board's own window pass it, on the host and on every
+   *  joined laptop (the host sends each the same list). Not Remote's contest view, whose page is sent
+   *  none of the club's rows. */
   clubLog?: ClubLogColumns
 }) {
   // The glance scale. One flag, applied at the handful of places that carry a
@@ -2022,6 +2034,62 @@ export function FdClubSection({
   const manage = showLink && !detached && !readOnly && onRemovePosition != null && onAllowBack != null
   // What the last Remove or Allow back did, until the next press.
   const [removeNote, setRemoveNote] = useState<{ text: string; alert: boolean } | null>(null)
+  // ⭐ IMPORT A LAPTOP'S FILE, the host's own contest screen alone. The file read, and whose
+  // contacts it holds: the position its journal's name carries (`fieldday_backup_<id>.adi`), or
+  // the one the host picks from its board.
+  const importInput = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState<{ text: string; file: string; posid: string; fromFile: string } | null>(
+    null,
+  )
+  const [importNote, setImportNote] = useState<{ lines: string[]; alert: boolean } | null>(null)
+  const canImport = club.hosting && onImport != null && !detached && !readOnly
+  function pickImport() {
+    if (isStreamInput()) {
+      setImportNote({ lines: [t('fieldDay.club.import.refusedRemote')], alert: true })
+      return
+    }
+    setImportNote(null)
+    importInput.current?.click()
+  }
+  async function readImport(f: File | undefined) {
+    if (!f) return
+    const text = await f.text()
+    const fromFile = /fieldday_backup_([0-9a-f]{8})\.adi$/i.exec(f.name)?.[1]?.toLowerCase() ?? ''
+    setImporting({ text, file: f.name, posid: fromFile, fromFile })
+  }
+  function runImport() {
+    if (isStreamInput()) {
+      setImportNote({ lines: [t('fieldDay.club.import.refusedRemote')], alert: true })
+      return
+    }
+    if (!importing || !importing.posid) return
+    const { text, file, posid } = importing
+    setImporting(null)
+    onImport?.(text, posid).then(
+      (r) => {
+        const kept = [
+          r.otherContest > 0 && t('fieldDay.club.import.otherContest', { n: r.otherContest }),
+          r.otherRunning > 0 && t('fieldDay.club.import.otherRunning', { n: r.otherRunning }),
+          r.otherCall > 0 && t('fieldDay.club.import.otherCall', { n: r.otherCall }),
+          r.takenBack > 0 && t('fieldDay.club.import.takenBack', { n: r.takenBack }),
+          r.unreadable > 0 && t('fieldDay.club.import.unreadable', { n: r.unreadable }),
+        ].filter((line): line is string => typeof line === 'string')
+        setImportNote({
+          lines: [
+            t('fieldDay.club.import.done', { file, added: r.added, dupes: r.dupes, alreadyIn: r.alreadyIn }),
+            ...(kept.length > 0 ? [t('fieldDay.club.import.keptOut', { list: kept.join(', ') })] : []),
+            ...r.refused.map((x) => t('fieldDay.club.import.refused', { call: x.call, reason: x.reason })),
+          ],
+          alert: false,
+        })
+      },
+      (err: unknown) =>
+        setImportNote({
+          lines: [t('fieldDay.club.import.failed', { msg: typeof err === 'string' ? err : String(err) })],
+          alert: true,
+        }),
+    )
+  }
   // The position a Remove press asks about, by id, until it is answered: asked only while that
   // position is on the board and not removed already.
   const [removing, setRemoving] = useState<{ posid: string; name: string } | null>(null)
@@ -2155,6 +2223,30 @@ export function FdClubSection({
             </button>
           </>
         )}
+        {canImport && (
+          <>
+            <button
+              type="button"
+              className="export-btn"
+              disabled={busy}
+              onClick={pickImport}
+              title={t('fieldDay.club.import.title')}
+            >
+              {t('fieldDay.club.import.label')}
+            </button>
+            <input
+              ref={importInput}
+              type="file"
+              accept=".adi,.adif"
+              hidden
+              data-club-import=""
+              onChange={(e) => {
+                void readImport(e.target.files?.[0])
+                e.target.value = ''
+              }}
+            />
+          </>
+        )}
         {!detached && !readOnly && (
           <button
             type="button"
@@ -2250,6 +2342,41 @@ export function FdClubSection({
       {removeNote && (
         <div style={removeNote.alert ? CLUB_WARN : CLUB_NOTE} role={removeNote.alert ? 'alert' : 'status'}>
           {removeNote.text}
+        </div>
+      )}
+      {/* Before an import: whose contacts the file holds, read from its name or picked here. */}
+      {canImport && importing && (
+        <div role="group" aria-label={t('fieldDay.club.import.ask.aria')} style={CLUB_CONFIRM}>
+          <div>{t('fieldDay.club.import.ask.head', { file: importing.file })}</div>
+          <select
+            value={importing.posid}
+            onChange={(e) => setImporting({ ...importing, posid: e.target.value })}
+          >
+            {importing.posid === '' && <option value="" />}
+            {importing.fromFile !== '' && !club.board.some((b) => b.posid === importing.fromFile) && (
+              <option value={importing.fromFile}>{t('fieldDay.club.import.ask.fromFile')}</option>
+            )}
+            {club.board.map((b) => (
+              <option key={b.posid} value={b.posid}>
+                {boardName(b)}
+              </option>
+            ))}
+          </select>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button type="button" className="export-btn" disabled={!importing.posid} onClick={runImport}>
+              {t('fieldDay.club.import.ask.yes')}
+            </button>
+            <button type="button" className="export-btn" onClick={() => setImporting(null)}>
+              {t('fieldDay.club.import.ask.no')}
+            </button>
+          </div>
+        </div>
+      )}
+      {importNote && (
+        <div style={importNote.alert ? CLUB_WARN : CLUB_NOTE} role={importNote.alert ? 'alert' : 'status'}>
+          {importNote.lines.map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
         </div>
       )}
       {/* The host's alone, for the rest of the event: every contact it kept out of the club's
@@ -2446,7 +2573,7 @@ export function FdClubSection({
           })}
         </div>
       )}
-      {clubLog && club.hosting && !readOnly && (
+      {clubLog && !readOnly && (
         <ClubLogList club={club} fieldDay={fieldDay} columns={clubLog} big={big} />
       )}
     </div>
@@ -3048,6 +3175,7 @@ export function ContestView({
   fdRuleset = null,
   tier,
   section,
+  keyboardMode: keyboardModeProp,
   observation,
   onOpenSettings,
   onSettingsSaved,
@@ -3062,8 +3190,8 @@ export function ContestView({
 }: Props) {
   const observed = observation !== undefined
   // The mode the banned-mode chip names: the station's own, given its section.
-  const pskName = usePskName(observed ? undefined : section)
-  const activeMode = section === undefined ? tier : stationMode(section, tier, pskName)
+  const keyboardMode = useKeyboardMode(observed ? undefined : section, keyboardModeProp)
+  const activeMode = section === undefined ? tier : stationMode(section, tier, keyboardMode)
   // The clock the spot advisory judges the event window by.
   const nowUnix = useNowUnix()
   // Log tail: bottom-pinned via the shared discipline. The old unconditional
@@ -3085,9 +3213,10 @@ export function ContestView({
   // The work-in hint, until it is dismissed on this computer (features/contestWorkIn).
   const [workInHint, setWorkInHint] = useState(() => !workInHintSeen())
   // The route to the cockpits that send: only with Contest mode on, and never on a page that watches;
-  // one button per cockpit this station shows (Settings ▸ Features, read as the rail reads it).
+  // one button per cockpit this station shows (Settings ▸ Features, read as the rail reads it), and
+  // per cockpit whose mode the contest allows (RTTY alone for the RTTY Roundup, `workInViewsFor`).
   const features = useFeatures()
-  const workInViews = (['cw', 'phone'] as const).filter((v) => features.enabled[v] !== false)
+  const workInViews = workInViewsFor(fdRuleset?.bannedModes, (v) => features.enabled[v] !== false)
   const workIn = fdActive && !observed && workInViews.length > 0
   const openedForRun = useRef(false)
 
@@ -3878,10 +4007,10 @@ export function ContestView({
                 key={view}
                 type="button"
                 className="export-btn"
-                title={view === 'cw' ? t('fieldDay.workIn.cw.title') : t('fieldDay.workIn.phone.title')}
+                title={workInTitle(view)}
                 onClick={() => (onWorkIn ?? askMainToWorkIn)(view)}
               >
-                {view === 'cw' ? t('fieldDay.workIn.cw') : t('fieldDay.workIn.phone')}
+                {workInLabel(view)}
               </button>
             ))}
           </div>
@@ -4091,6 +4220,7 @@ export function ContestView({
           onGivePosition={observed ? undefined : fdClubGivePosition}
           onRemovePosition={observed ? undefined : fdClubRemovePosition}
           onAllowBack={observed ? undefined : fdClubAllowBack}
+          onImport={observed ? undefined : fdClubImport}
           busy={busy !== null}
           readOnly={observed}
           fieldDay={fdEventIsFieldDay}

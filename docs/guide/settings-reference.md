@@ -62,6 +62,16 @@ Your operator identity, license privileges, and default frequency.
   dropdown. Open = no limits (outside the US)." This is a software transmit guard
   in every Nexus TX path, checked against the Part 97 sub-band table — Nexus
   refuses to key the rig outside your segment.
+- **Your experience** — New to the hobby, New to digital or Experienced: the answer to
+  the first-run wizard's first question. It picks which screens start on (New to the
+  hobby: FT8, the log and the maps; New to digital: the same plus Phone and CW;
+  Experienced: everything) and, for the two "new" answers, opens each Settings tab on
+  the sections you need first, with the rest folded to their headings until
+  **Show all**, a search or a link opens them (Accessibility and Features never
+  fold). Changing it replaces the set in [Features](#features), asking first, and
+  naming them, whenever the change would turn screens off. It saves
+  when you pick it. A station set up before this question existed shows **Not set**,
+  and nothing changes until you pick an answer. It changes nothing about transmitting.
 - **Units** — Automatic (from your system), Metric (km, °C) or Imperial (mi, °F).
   Covers distances, temperature and wind speed across the whole app. Automatic
   follows your operating system's region, and a change applies everywhere the
@@ -1137,9 +1147,15 @@ second. Every value shown is one station's.*
 
 **Logging Behavior**
 
-- **Auto-log QSOs** — "Automatically log completed contacts to the ADIF logbook."
-- **Prompt before logging** — a WSJT-X-style confirm-and-edit popup instead of
-  logging silently. "No effect unless Auto-log is on."
+- **Auto-log QSOs** — "Log each completed contact to the ADIF logbook by
+  itself. A contact you opened by clicking their RR73 or RRR exchanges no
+  reports and is never logged by itself: it waits for your confirm in the
+  popup."
+- **Prompt before logging** — a WSJT-X-style confirm-and-edit popup. It opens
+  by itself with Auto-log on or off and holds each contact until you log or
+  discard it; if 64 are left waiting, the oldest is logged, never one you
+  opened by clicking their RR73 or RRR. With both off, nothing is logged until
+  you press Log.
 - **Roger with RRR (not RR73)** — "Acknowledge the final report with a bare RRR
   (partner still owes a 73) instead of the combined RR73. Off = RR73 (modern FT8
   practice)."
@@ -1528,6 +1544,11 @@ nothing until you enable TX in the cockpit, every session.
 
 **Lists and marks**
 
+- **Reset Band activity, the call list and the RX pane at startup** — JS8Call's "Reset the Band
+  Activity, Call Activity, and RX history at startup", off by default. On, each time Nexus starts
+  the three lists start empty, as **Clear all lists…** leaves them; what is heard after fills them
+  again. Your Inbox and the station's own record of who it heard are kept. It takes effect at the
+  next start.
 - **Hide these callsigns in the RX pane** — JS8Call 3.0's RX block list, comma-separated and
   empty by default. Nothing a listed station sends prints in the RX pane (by its call as heard
   or its base call), and the call list marks it ✕; it is still heard, answered and filed as
@@ -1543,10 +1564,29 @@ nothing until you enable TX in the cockpit, every session.
 
 **Sounds**
 
-A short tone of its own for each of: a CQ, a heartbeat, an ACK for you, a message directed to
-you or your group, a message filed in your Inbox, a new callsign, a callsign you have worked.
-All off by default, as JS8Call's notifications are; **Test** plays one. They sound while the
-JS8 screen is open. JS8Call plays a sound file you pick for each; Nexus plays its own tones.
+A sound for each of: a CQ, a heartbeat, an ACK for you, a message directed to you or your
+group, a message filed in your Inbox, a new callsign, a callsign you have worked. All off by
+default, as JS8Call's notifications are. Each plays a short tone of its own, or a WAV file you
+pick with **Choose…**, as JS8Call plays the file you pick for each; **Reset to built-in** goes
+back to the tone, and **Test** plays it. A file that cannot be played (moved, not a WAV file,
+larger than 10 MB) plays the tone instead, and Nexus says so once. They sound whichever screen
+is showing while JS8 is the mode, as JS8Call's do. The files are this computer's and travel in a
+profile; only a file chosen here is ever read. **Play the sounds on** picks the output (the system
+default unless you pick one). It is never a device your radio transmits from: a sound there could
+key a rig on VOX, so the radio's TX audio devices are shown but cannot be picked, and every sound
+is checked as it plays, so one is refused even if a TX audio device is changed to it later.
+
+**Colours and fonts**
+
+- JS8Call's colours and fonts for the **RX pane** (background, received text, transmitted text, and a
+  font for each kind of text), **Band activity and the call list** (one set for both, as in JS8Call:
+  background, text, selected row, traffic to you, CQ messages, the primary and secondary highlights,
+  and a font) and the **compose box** (background, text and a font). Each colour starts as the
+  theme's and opens a colour picker. What you pick is kept for the theme in use (Light or Dark); the
+  other theme keeps its own, so a colour chosen to read well on one never paints the other. A font
+  (a family name, and a size in points) serves both themes; a family this computer lacks falls back
+  to the theme's. A sample of each pane shows the result, a line under it says when a text would be
+  hard to read on its background (under 4.5:1), and **Reset** gives that pane back to the theme.
 
 **Sending**
 
@@ -1936,6 +1976,19 @@ way. Most awards count band slots, not band-and-mode slots, which is why off is 
   resolver is fixed for a running session, so a downloaded update **applies at
   the next launch** — the status line shows the active release date and notes
   when a newer download is waiting.
+
+### IOTA island list
+
+- **Show IOTA island names** — on by default. IOTA Ltd's island-group list
+  (© RSGB and © Islands On The Air (IOTA) Ltd) ships with Nexus by IOTA Ltd's
+  permission, and while this is on Nexus checks iota-world.org for a newer copy at
+  most monthly; a newer download replaces the shipped one, and a failed check keeps
+  the copy in use. The Logbook and the contact card show each group's name beside a
+  reference, with IOTA Ltd's credit and a link, and flag a reference that is not an
+  island group. The line below says how many groups are in use and whether that is
+  the copy shipped with Nexus or a newer one. Turning it off shows no names, stops
+  the check and deletes any downloaded copy: a reference is then checked by its
+  shape (`EU-131`) only.
 
 ---
 

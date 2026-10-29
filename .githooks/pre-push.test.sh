@@ -312,8 +312,13 @@ ENVV="NEXUS_RELEASE_APPROVED=1 NEXUS_REQUIRE_GREEN_CI=$LAB/ci-red" \
 
 # --- 1: wrong remote -------------------------------------------------------------
 note "wrong-remote guard"
-git remote add tempo "https://github.com/kd9taw/tempo.git"
+# Git contacts the remote before running pre-push. Keep even the refused push local.
+git init -q --bare "$LAB/kd9taw/tempo.git"
+git remote add tempo "$LAB/kd9taw/tempo.git"
 expect BLOCK "push to kd9taw/tempo" tempo HEAD:refs/heads/main
+if ! printf '%s\n' "$out" | grep -q "unrelated kd9taw/tempo repo"; then
+  FAIL=$((FAIL+1)); printf '  FAIL wrong-remote refusal did not come from the guard\n'
+fi
 
 # --- misc: deletion, no-op, patterns file missing ---------------------------------
 note "edge cases"

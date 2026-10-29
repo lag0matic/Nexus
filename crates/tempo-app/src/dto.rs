@@ -857,6 +857,52 @@ pub struct JttyTxState {
     pub pending: String,
     /// WSJT-X's queue notice: replaced characters, complete, cancelled, or why it stopped.
     pub notice: Option<String>,
+    /// WSJT-X's "Frames: sent/total" for this over: frames of what was sent that are on the air,
+    /// and those plus what is still queued (the filler in neither).
+    pub frames_sent: u32,
+    pub frames_total: u32,
+    /// The newest Log QSO prompt (a send starting "TU " went out), or `None`.
+    pub log_prompt: Option<JttyLogPrompt>,
+    /// WSJT-X's "Message style": which of the two F-key sets F1-F8 send.
+    pub style: crate::settings::JttyMessageStyle,
+    /// The eight templates F1-F8 send in that style (the keys' captions).
+    pub fkeys: Vec<String>,
+}
+
+/// WSJT-X's Log QSO prompt after a JTTY send starting "TU " goes out (`logQSOTimer`): whom the
+/// send named and the serial it sent. A prompt only: nothing is logged unless the operator logs it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JttyLogPrompt {
+    /// Numbered from 1 each session: the cockpit asks once per prompt.
+    pub id: u64,
+    /// The DX call the send was made with (the Call box); empty when there was none.
+    pub call: String,
+    /// The serial number the exchange sent (WSJT-X's `m_xSent`), before it moved on.
+    pub serial: u32,
+    /// When the send started on the air, UTC milliseconds.
+    pub at_utc_ms: i64,
+    /// The station whose prompt this one replaced while it was still unanswered (a second TU to
+    /// another station): that contact is logged from the log strip, not from here.
+    #[serde(default)]
+    pub replaced: Option<String>,
+}
+
+/// How an answer of a Log QSO prompt went (`jtty_log_prompt_answer`): `Taken` is the first answer
+/// of the prompt still asked, and the only one that lets a screen log; every other says why not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum JttyLogPromptAnswer {
+    /// This answer took it: Log QSO may log the contact.
+    Taken,
+    /// Another answer (Log QSO or Not now, on any screen) took it first.
+    Answered,
+    /// The contact is in the log already, logged by another route.
+    Logged,
+    /// A newer TU raised a prompt of its own in its place.
+    Replaced,
+    /// Too old to ask, or the screen was left.
+    Expired,
 }
 
 /// One message in the JTTY receive window.
@@ -890,6 +936,10 @@ pub struct JttyLine {
     /// A message this station SENT (WSJT-X shows each in the QSO Frequency pane as it starts on
     /// the air, its SNR column blank): `snr` is 0 and `line` has no SNR.
     pub tx: bool,
+    /// A message found by decoding again (WSJT-X's review), and which review: the panes show
+    /// each review's lines together under a heading. Absent for live reception.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<u64>,
 }
 
 /// A JTTY station decoded in two separate messages a short time apart, at its latest message
@@ -1630,6 +1680,12 @@ pub struct RadioStatus {
     /// mode, not the sideband it was generated on) without a settings round-trip.
     #[serde(default)]
     pub operating_mode: String,
+    /// The mode the Keyboard section's contacts log under: "JTTY" on the JTTY modem, else the PSK
+    /// sub-mode picked in the PSK cockpit ("PSK31" | "QPSK31"). PSK and JTTY are ONE section
+    /// ("keyboard" above), so the section alone cannot say which is on the air. Always filled;
+    /// read it while `operating_mode` is "keyboard". Empty from a station older than this field.
+    #[serde(default)]
+    pub keyboard_mode: String,
     /// The rig keyed by something that is NOT Nexus (mic PTT / straight key), read back
     /// over CAT (#57). Display-only — feeds the TX badge and the meter pane.
     #[serde(default)]
@@ -1768,6 +1824,31 @@ pub struct RadioStatus {
     pub tx_po_w: Option<f32>,
     #[serde(default)]
     pub tx_comp_db: Option<f32>,
+    /// The radio's own PA (finals) temperature in degrees CELSIUS, as its CAT interface last
+    /// reported it. `None` where the radio does not report one (most do not), and then left out
+    /// of the JSON, so a snapshot without it stays byte-identical. Not a transmit meter: it is
+    /// read while receiving and kept across overs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pa_temp_c: Option<f32>,
+    /// The radio's own TEMP meter position, 0.0 to 1.0, where the radio reports a meter and no
+    /// degrees (the FTDX101's `RM9`: Yaesu publishes no degree scale for it). Shown as the
+    /// radio's own meter, never converted to degrees. Left out of the JSON when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pa_temp_meter: Option<f32>,
+    /// The radio's SSB transmit-bandwidth steps, in the radio's own order and front-panel words
+    /// (an Icom's `WIDE`/`MID`/`NAR`; a Yaesu's is parked for now). Empty where Nexus has no CAT
+    /// command for it on this radio, or the radio has not answered one yet; then the selector is
+    /// hidden and the field is left out of the JSON.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tx_bw_steps: Vec<String>,
+    /// Which of `tx_bw_steps` the radio says it is on, as read back. `None` until it answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tx_bw: Option<String>,
+    /// May the TX meters offer the speech-processor (PROC) switch: true only on a link where the
+    /// switch's write is the radio maker's own command (the native Icom link's `16 44`). Left out
+    /// of the JSON when false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub tx_proc_switch: bool,
     /// Can Nexus put a NUMBER to this radio's SWR — i.e. may the high-SWR cutoff be offered?
     /// True only on the two paths that convert the raw meter with a scale we can point at:
     /// the native Icom CI-V daemon, and a FlexRadio's own VITA meter stream. False everywhere
@@ -1830,6 +1911,12 @@ pub struct RadioStatus {
     /// positive spelling would default a working ATU button to disabled.
     #[serde(default)]
     pub atu_start_tune_unsupported: bool,
+    /// The ATU button's menu offers "Switch tuner out" (#344): the radio reports a tuner and this
+    /// CAT path can switch it out (`Engine::atu_switch_out_supported` — never Nexus's own Flex
+    /// client, never the native Icom path). POSITIVE ON PURPOSE: a station older than the page
+    /// has no switch-out command, and `false` offers none.
+    #[serde(default)]
+    pub atu_switch_out: bool,
     /// Rig RX passband / filter width in Hz from CAT; `None` = unknown or the rig's own default.
     #[serde(default)]
     pub filter_width_hz: Option<u32>,
@@ -2053,6 +2140,12 @@ pub struct RadioStatus {
     /// exactly this, "is not where anyone looks".
     #[serde(default)]
     pub cat_share_error: Option<String>,
+    /// The port the CAT broker is actually serving on (#165), `None` while it is not serving.
+    /// Usually Settings' "Sharing port"; when another program already holds that port, the
+    /// broker leaves it alone and serves on the next free one, and this is where programs must
+    /// connect. ABSENT while not sharing, so a snapshot without sharing is byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cat_share_port: Option<u16>,
     /// The TCI server ("Share by TCI"): where programs connect, why it is not serving, and the
     /// programs connected. ABSENT while the server is switched off, so every snapshot without it
     /// is byte-identical. Written by `src-tauri/src/tci_server.rs` on each of its ticks.
@@ -3644,12 +3737,45 @@ pub struct FdClubOtherLocationDto {
     pub club: String,
 }
 
-/// ⭐ **The host's club log, as its own screen lists it** (`Engine::fd_club_log_newest`): how many
-/// contacts the club holds, and the newest of them, newest first.
+/// ⭐ **What the host's "Import a laptop's file…" did** (`Engine::fd_club_import`): how many of
+/// the file's contacts it added, how many were duplicates or already in, and how many it kept out
+/// and why. Nothing is ever taken out of the club's log.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FdClubImportDto {
+    /// New contacts in the club's log.
+    pub added: usize,
+    /// Duplicates of a contact the club holds: merged as sync merges one, and the club's files
+    /// keep the earliest.
+    pub dupes: usize,
+    /// Contacts the club already held, from that position.
+    pub already_in: usize,
+    /// Kept out: of another contest, of another running of this one, logged on another call than
+    /// the club's, taken back on that laptop, and records that cannot be read.
+    pub other_contest: usize,
+    pub other_running: usize,
+    pub other_call: usize,
+    pub taken_back: usize,
+    pub unreadable: usize,
+    /// Kept out where every contact enters the club's log, each with the host screen's sentence.
+    pub refused: Vec<FdImportRefusedDto>,
+}
+
+/// One contact the club's intake kept out of an import ([`FdClubImportDto::refused`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FdImportRefusedDto {
+    pub call: String,
+    pub reason: String,
+}
+
+/// ⭐ **The club log, as the host's own screen lists it** (`Engine::fd_club_log_newest`): how many
+/// contacts the club holds, and the newest of them, newest first. A joined laptop answers the same
+/// list, as the host sent it on its `rows` lines (`tempo_net::fdsync::ClubRows`).
 ///
-/// ⛔ The host's own screens only, as the answer to a command of its own. It rides nothing else:
-/// not the snapshot (so not Remote's, whose Field Day check refuses a key it does not know), not
-/// the club line every position is sent, not the TV board.
+/// ⛔ The station's own screens only, as the answer to a command of its own. It rides nothing
+/// else: not the snapshot (so not Remote's, whose Field Day check refuses a key it does not know),
+/// not the TV board.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FdClubLogDto {
@@ -3980,6 +4106,11 @@ pub struct LoggedContestDto {
     pub sent: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rcvd: Vec<(String, String)>,
+    /// The exchange's own standard ADIF columns, `(tag, value)` (`CNTY`, `ARRL_SECT`, `CQZ` …):
+    /// what the ADIF writer, the uploads and the awards read for those fields on this contact, so
+    /// the contact card shows them and does not offer to change them beside it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adif: Vec<(String, String)>,
 }
 
 impl From<tempo_core::logbook::ContestFields> for LoggedContestDto {
@@ -3992,6 +4123,7 @@ impl From<tempo_core::logbook::ContestFields> for LoggedContestDto {
             srx_string: c.srx_string,
             sent: c.sent,
             rcvd: c.rcvd,
+            adif: c.adif,
         }
     }
 }
@@ -4935,6 +5067,23 @@ pub struct AiCwStatus {
     pub text: String,
 }
 
+/// One radio switch Nexus made BY ITSELF: the routing handed a band (and mode class) to another
+/// radio (`Settings::route_radio`). The UI tells the operator, with Undo, when the station's
+/// `radio_switch_policy` says to. `seq` grows by one per switch, so a screen tells a new switch
+/// from one it has already shown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoRadioSwitch {
+    pub seq: u64,
+    /// The radio that was active before: what Undo selects again.
+    pub from_id: u32,
+    pub to_id: u32,
+    /// The band that was asked for ("2m"); empty for a dial off the band plan.
+    pub band: String,
+    /// The mode class the routing decided on.
+    pub mode: crate::settings::RouteMode,
+}
+
 /// The full application snapshot the UI renders from.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -4953,6 +5102,10 @@ pub struct AppSnapshot {
     /// Peg-lock state (band selection won't auto-switch when true).
     #[serde(default)]
     pub radio_pegged: bool,
+    /// The last time Nexus switched the active radio BY ITSELF, for the switch notice. Absent
+    /// until a band or mode the routing hands to another radio has switched one this session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_radio_switch: Option<AutoRadioSwitch>,
     /// Mirror of `Settings::b4_match_mode` so display surfaces (the recall Dupe badge) apply
     /// the same B4/Dupe scope the engine's worked-band sets were built with — two readers of
     /// one setting must never disagree about what "worked before" means.
@@ -5024,6 +5177,10 @@ pub struct AppSnapshot {
     /// clears the cockpit's DX fields just like a manual log does.
     #[serde(default)]
     pub logged_tick: u32,
+    /// Bumped on every band change, by any route — the cockpits clear their call boxes on
+    /// change (the FT DX call, the JS8 To box, the JTTY Call box, the log strip's call).
+    #[serde(default)]
+    pub band_change_tick: u32,
     /// Pending one-click POTA/SOTA hunt (the next QSO with this call auto-tags
     /// the park). None = not hunting.
     #[serde(default)]
@@ -5055,6 +5212,12 @@ pub struct AppSnapshot {
     /// own turn in the popup. `0` when the one shown is the only one.
     #[serde(default)]
     pub pending_logs_waiting: u32,
+    /// How many finished contacts wait for Log QSO with Auto-log and the popup both off: ones a
+    /// click on another station, Call CQ or a mode change replaced before they were logged. Each
+    /// press logs one, oldest first; the cockpit shows the count beside Log. The contact on screen
+    /// is not counted.
+    #[serde(default)]
+    pub log_qso_waiting: u32,
     /// ⭐ R3 — how many contacts have been logged WITHOUT the operator's confirmation since
     /// they last answered the popup, because the confirm-before-log queue was full. The popup
     /// shows it; the Connections log carries the same event with the call, band, mode and time.

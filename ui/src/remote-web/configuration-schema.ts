@@ -42,6 +42,8 @@ export const SETTINGS_KEYS = [
   'js8HoldPtt',
   'js8TxOffsetWhileSending',
   'js8TxDelayMs',
+  'js8ResetActivity',
+  'js8PaneStyle',
   'rptrOffsetOverrideHz',
   'fdActive',
   'fdClass',
@@ -93,6 +95,7 @@ export const SETTINGS_KEYS = [
   'icomDataMode',
   'dataModesPlainSsb',
   'sstvHoldDataSubmode',
+  'aprsDataFm',
   'setRigMode',
   'operatingMode',
   'licenseClass',
@@ -384,6 +387,10 @@ export const NEWER_SETTINGS = {
   // A station that predates the Needed board's WPX and WAE chips shows neither: both settings off.
   showWpxNeeds: false,
   showWaeNeeds: false,
+  // …and one that predates JS8Call's startup reset keeps its lists from one run to the next: off.
+  js8ResetActivity: false,
+  // …and one that predates JS8Call's colours and fonts draws every JS8 pane in the theme's.
+  js8PaneStyle: { light: {}, dark: {}, fonts: {} },
 } as const
 /** The per-radio withheld list, mirroring Rust RADIO_WITHHELD_KEYS. Empty today by design: it
  *  exists so the first per-radio credential has somewhere to go that is not the wire, and so the
@@ -468,6 +475,8 @@ export const SETTINGS_SHAPES = {
   "js8HoldPtt": "boolean",
   "js8TxOffsetWhileSending": "boolean",
   "js8TxDelayMs": "number",
+  "js8ResetActivity": "boolean",
+  "js8PaneStyle": "object",
   "rptrOffsetOverrideHz": "number",
   "fdActive": "boolean",
   "fdClass": "string",
@@ -519,6 +528,7 @@ export const SETTINGS_SHAPES = {
   "icomDataMode": "number",
   "dataModesPlainSsb": "boolean",
   "sstvHoldDataSubmode": "boolean",
+  "aprsDataFm": "boolean",
   "setRigMode": "boolean",
   "operatingMode": "string",
   "licenseClass": "string",

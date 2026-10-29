@@ -245,6 +245,10 @@ interface Props {
    *  pick, or the RX marker paging a zoomed view. JTTY's decoder searches its fixed channels
    *  only inside the range WSJT-X's wide graph shows, so its cockpit hands this on. */
   onViewChange?: (loHz: number, hiHz: number) => void
+  /** A left double-click (not with Ctrl) on a row of the flat picture: that row's time, UTC ms, as
+   *  it was drawn. JTTY decodes again from it, as WSJT-X's wide graph does
+   *  (`CPlotter::mouseDoubleClickEvent`). Omitted ⇒ a double-click is two clicks, as before. */
+  onRowDoubleClick?: (utcMs: number) => void
   /** A control of the host's own in the header row, after the hint (JS8's decode-filter plate,
    *  which opens its waterfall controls). Display and receive only: it hosts no stop control and
    *  no sender. Omitted ⇒ the header as before. */
@@ -272,6 +276,12 @@ interface Props {
    *  dropped, so a row lands on the first frame at or past `rowMs` after the last: 120 ms is
    *  8 frames at 60 Hz, ~133 ms, the cadence the FT surfaces' history depth is judged at. */
   keepRowRemainder?: boolean
+  /** JS8's decode filter, lo–hi Hz: the audio outside it is darkened as JS8Call's waterfall darkens
+   *  it, black at its 50 % (127 of 255) over the whole height with a yellow line at each edge,
+   *  painted last, over the markers (`CPlotter::drawFilter`, CPlotter.cpp:468-503 and :150-154;
+   *  WideGraph.cpp:239-240, :616-618). PAINT ONLY: no click, gesture or hit-test reads it. Unset or
+   *  null = nothing, so every other mode's waterfall draws exactly as before. */
+  shade?: { loHz: number; hiHz: number } | null
 }
 
 /** One label on the picture: its text at `hz`. `opacity` 0..1 is the host's (a fading tag);
@@ -296,6 +306,11 @@ const tagWidthPx = (label: string) => label.length * 6.6 + 12
 const TAG_GAP_PX = 4
 /** Room kept at the right for the count of tags left out, CSS px at text scale 1. */
 const TAG_COUNT_PX = 36
+
+/** JS8Call's "Filter Opacity" default, 50 %, as it hands it to the plotter: `int(0.5 * 255)`. */
+const SHADE_ALPHA = 127 / 255
+/** The filter edge's line: Qt's yellow, as JS8Call draws it. */
+const SHADE_EDGE = '#ffff00'
 
 // Default FT8/digital view window (Hz) — the FT8 signals live here, now spanning the full 4 kHz
 // spectrum row so stations calling above ~2.9 kHz are visible + clickable. drawRow maps the view
@@ -352,6 +367,8 @@ export function Waterfall({
   onTag,
   tagLanes,
   keepRowRemainder = false,
+  onRowDoubleClick,
+  shade,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // Separate transparent overlay for the axis + Rx/Tx markers, so they are NEVER baked into
@@ -463,6 +480,7 @@ export function Waterfall({
   const toneBandRef = useRef(toneBand)
   const keyedRef = useRef(keyed)
   const markerWidthRef = useRef(markerWidthHz)
+  const shadeRef = useRef(shade)
   const activeRef = useRef(active)
   const rowMsRef = useRef(rowMs)
   const keepRemainderRef = useRef(keepRowRemainder)
@@ -504,6 +522,9 @@ export function Waterfall({
   /** Scrollback while paused: the age of the newest row on screen (0 = the live tail). A row
    *  committed while paused adds one, so the paused picture holds still. */
   const offsetRef = useRef(0)
+  /** The time a row of the flat picture was drawn, from its height in the canvas (CSS px), read
+   *  through the renderer's own row mapping; set by the drawing effect, which owns the geometry. */
+  const rowTimeAtRef = useRef<((yCss: number) => number | null) | null>(null)
   /** Cold-path re-render hook, owned by the canvas effect (null until mounted). */
   const rebuildRef = useRef<(() => void) | null>(null)
 
@@ -515,6 +536,7 @@ export function Waterfall({
   toneBandRef.current = toneBand
   keyedRef.current = keyed
   markerWidthRef.current = markerWidthHz
+  shadeRef.current = shade
   activeRef.current = active
   rowMsRef.current = rowMs
   keepRemainderRef.current = keepRowRemainder
@@ -686,6 +708,18 @@ export function Waterfall({
       newestAtTop: newestAtTopRef.current,
       trace: null,
     })
+
+    // The row under a height in the canvas, by the mapping the paused time tape reads (newest row
+    // at the top by default, at the bottom when the flow is flipped): its drawn time, or null on
+    // the axis strip, past the history, or in the 3D view.
+    rowTimeAtRef.current = (yCss: number) => {
+      const wfH = cssH - axisHFor(cssH)
+      if (dssRef.current || yCss < 0 || yCss >= wfH) return null
+      const devRows = Math.max(1, Math.round(wfH * scaleY))
+      const yDev = Math.min(devRows - 1, Math.round(yCss * scaleY))
+      const age = offsetRef.current + (newestAtTopRef.current ? yDev : devRows - 1 - yDev)
+      return renderer.rowAt(age)?.tMs ?? null
+    }
 
     const resize = (entry?: ResizeObserverEntry) => {
       const rect = canvas.getBoundingClientRect()
@@ -1049,6 +1083,24 @@ export function Waterfall({
           octx.fillText('RX', Math.min(W - 18 * textScale, rxx + 3), wfH - 6 * textScale)
         }
       }
+
+      // JS8's decode filter, last and over everything, as JS8Call paints it: each side outside it
+      // darkened top to bottom, and a yellow line at an edge that is in view. A side outside the
+      // view has nothing to darken; a filter wholly to one side of it darkens the whole view
+      // (freqToX clamps to the window's edges).
+      const filter = shadeRef.current
+      if (filter) {
+        const lx = freqToX(filter.loHz, W, vlo, vhi)
+        const hx = freqToX(filter.hiHz, W, vlo, vhi)
+        octx.globalAlpha = SHADE_ALPHA
+        octx.fillStyle = '#000000'
+        if (filter.loHz > vlo) octx.fillRect(0, 0, lx, H)
+        if (filter.hiHz < vhi) octx.fillRect(hx, 0, W - hx, H)
+        octx.globalAlpha = 1
+        octx.fillStyle = SHADE_EDGE
+        if (filter.loHz > vlo && filter.loHz < vhi) octx.fillRect(lx, 0, 1, H)
+        if (filter.hiHz > vlo && filter.hiHz < vhi) octx.fillRect(hx, 0, 1, H)
+      }
     }
 
     /** Everything the overlay draws from, as one string: it is drawn again only when this moves
@@ -1058,7 +1110,8 @@ export function Waterfall({
       const named = c ? c.map((k) => `${k.hz}/${k.color}/${k.label}`).join(',') : '-'
       const band = toneBandRef.current
       const shade = band ? `${band.loHz}/${band.hiHz}/${keyedRef.current}` : '-'
-      return `${cssW}|${cssH}|${scaleX}|${scaleY}|${textScale}|${viewLoRef.current}|${viewHiRef.current}|${txOffRef.current}|${rxOffRef.current}|${markerWidthRef.current}|${txRef.current}|${named}|${shade}`
+      const filter = shadeRef.current
+      return `${cssW}|${cssH}|${scaleX}|${scaleY}|${textScale}|${viewLoRef.current}|${viewHiRef.current}|${txOffRef.current}|${rxOffRef.current}|${markerWidthRef.current}|${txRef.current}|${named}|${shade}|${filter ? `${filter.loHz}-${filter.hiHz}` : '-'}`
     }
 
     const loop = (now: number) => {
@@ -1118,6 +1171,7 @@ export function Waterfall({
       running = false
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
       ro.disconnect()
+      rowTimeAtRef.current = null
       release()
     }
     // intentionally run once; live props read via refs
@@ -1349,6 +1403,16 @@ export function Waterfall({
           ref={canvasRef}
           className="waterfall-canvas"
           onMouseDown={handleMouseDown}
+          onDoubleClick={
+            onRowDoubleClick
+              ? (e) => {
+                  if (e.button !== 0 || e.ctrlKey || e.metaKey) return
+                  const rect = canvasRef.current!.getBoundingClientRect()
+                  const at = rowTimeAtRef.current?.(e.clientY - rect.top)
+                  if (at != null) onRowDoubleClick(at)
+                }
+              : undefined
+          }
           onContextMenu={(e) => e.preventDefault()}
           onWheel={(e) => {
             // Paused = scrollback mode. The wheel FOLLOWS THE FLOW: older rows lie the way

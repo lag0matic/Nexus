@@ -6,11 +6,12 @@
 
 import { Fragment, lazy, Suspense, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { confirmDialog } from '../confirm'
+import { oneLineTyped } from '../typedInput'
 import { t } from '../i18n'
 import { T } from '../i18n/T'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Activation, ImportStats, LogExport, LoggedActivation, LoggedQso, Settings } from '../types'
-import { QsoDetail } from './QsoDetail'
+import { ContactCard, type CardContact } from './ContactCard'
 import { LongwaveSync } from './LongwaveSync'
 import { RecentlyDeleted } from './RecentlyDeleted'
 import { LogTools, type LogTool } from './LogTools'
@@ -25,15 +26,19 @@ import { emptyAnswer, type LogLocate, type LogPage, type LogQuestion } from '../
 import { DEFAULT_LOG_QUERY, defaultAsc, fmtUtc, logQueryKey, type LogQuery, type LogSortKey } from '../features/logQuery'
 import { failureToShow, logSource, useLogAnswer, useLogAnswers, useLogPages, useLogStatus } from '../features/logSource'
 import { LOTW_SKIP_TOAST_MS, lotwSkipNote } from '../features/lotwSkips'
+import { lotwOneRefusal } from '../features/lotwBacklog'
 import { sayExportLacks } from '../features/exportLacks'
 import { UTC_DATE_FORMAT, UTC_TIME_FORMATS, parseUtcDate, parseUtcTime, utcDate, utcDateTimeToUnix, utcTime } from '../features/utcLog'
 import { SpotDialog } from './SpotDialog'
+import { QslCardsToSend } from './QslCardsToSend'
+import { cardQueued } from '../features/qslLabels'
 import { ImportPreview } from './ImportPreview'
 import { importTooLarge } from '../features/logImport'
 import { ParkStateReview } from './ParkStateReview'
 import { ConfirmationReview } from './ConfirmationReview'
 import { LogCountryPicker } from './LogCountryPicker'
 import { LogColumnsMenu } from './LogColumnsMenu'
+import { announce } from '../announce'
 import { LogFilterBar } from './LogFilterBar'
 import { clickSort, filterKey, sortPlace, type LogFilter, type LogSort } from '../features/logFilter'
 import { activationFilter } from '../features/potaActivation'
@@ -53,6 +58,8 @@ import {
   uploadMark,
   uploadOf,
   uploadWord,
+  withColumnMoved,
+  withColumnStep,
   withColumnWidth,
   type LogColumn,
   type LogColumnsSaved,
@@ -79,6 +86,7 @@ import {
   logQso,
   markLotwUploaded,
   markQslSentById,
+  queueQslCardById,
   markQslCardById,
   setSatTagById,
   setDxccById,
@@ -88,12 +96,16 @@ import {
   saveTextToDownloads,
   syncLotwReport,
   uploadLotwReport,
+  uploadLotwReportByIds,
+  downloadEqslReport,
+  getSettings,
 } from '../api'
 import { failureText, pushToast, withErrorToast } from '../toast'
 import { qrzPushQso, clublogPushQso, hrdlogPushQso, wrlPushQso, syncQrz, downloadLotwReport, importPotaLog } from '../api'
 import { qrzCorrectPreview, qrzCorrectApply, qrzCorrectUndoMiss } from '../api'
 import { callCardTrigger, qrzPageOf } from './CallCard'
-import type { QrzCorrectResult, QsoEdit, RowAnswer, RowRef } from '../api'
+import { IotaOfferChip, IotaReferenceNote, useIotaOffer } from './Iota'
+import type { FieldEdit, QrzCorrectResult, QsoEdit, RowAnswer, RowRef } from '../api'
 
 interface Props {
   /** The saved destination, supplied by App's station settings (not a settings draft). */
@@ -202,6 +214,7 @@ const CLUBLOG_LABEL = 'CL'
 const HRDLOG_LABEL = 'HL'
 // Technical product token, not prose — same ruling as the labels above.
 const WRL_LABEL = 'WRL'
+const LOTW_LABEL = 'LoTW'
 const QSL_MENU_LABEL = 'QSL▸'
 /** The satellite tag menu. `SAT` is the ADIF `PROP_MODE` value itself, not a word. */
 const SAT_MENU_LABEL = 'SAT▸'
@@ -216,6 +229,9 @@ const IOTA_RE = /^(AF|AN|AS|EU|NA|OC|SA)-\d{3}$/
 const FORM_EDITS: ReadonlySet<string> = new Set(['grid', 'iota'])
 /** One Alt+←/→ on a column header: a column's width moves this far. */
 const RESIZE_STEP_PX = 16
+/** How far a press on a header travels sideways before it is a drag that moves the column, not a
+ *  click that sorts it. */
+const MOVE_SLOP_PX = 6
 
 function fmtReport(v: string | null): string {
   return v && v.trim() !== '' ? v : '—'
@@ -460,6 +476,7 @@ export function Logbook({
   // arm the danger button — a deliberate, typed gate for a wipe of the whole log.
   const [showPurge, setShowPurge] = useState(false)
   const [showDeleted, setShowDeleted] = useState(false)
+  const [showCards, setShowCards] = useState(false)
   // The clean-up tools (LogTools.tsx): which one the dialog shows, while it is open.
   const [tools, setTools] = useState<LogTool | null>(null)
   const [purgeText, setPurgeText] = useState('')
@@ -484,13 +501,10 @@ export function Logbook({
   // rather than being overwritten (null on a Remote browser, which names the row its own way).
   // null = the form logs a NEW QSO.
   const [editing, setEditing] = useState<{ key: string; row: LoggedQso; ref: RowRef | null } | null>(null)
-  /** The contact open in the detail view (#313 — "there's no View capability"). Read-only:
-   *  the pencil beside it is still the one editing path, so there is one writer. */
-  const [viewing, setViewing] = useState<LoggedQso | null>(null)
-  const viewingRow = useLogAnswer(viewing?.id ? { kind: 'row', id: viewing.id } : null, logTick)
-  useEffect(() => {
-    if (viewingRow === null) setViewing(null)
-  }, [viewingRow])
+  /** The contact open on the contact card (#313's "there's no View capability", and the card the
+   *  operator asked for after it): every field shown and editable, saved through `saveEdit` — the
+   *  edit form's one write path — so there is still one writer. */
+  const [card, setCard] = useState<CardContact | null>(null)
   const editingKey = editing?.key ?? null
   // Column sort — the order the engine cuts the list's pages in (`features/logQuery`). Default
   // newest-first (the log's own order is oldest-first, which the test user disliked).
@@ -508,6 +522,12 @@ export function Logbook({
   const syncRef = useRef<HTMLInputElement>(null)
   const potaRef = useRef<HTMLInputElement>(null)
 
+  // The IOTA reference the station offers a contact being ADDED here (a spot comment's, or the
+  // callbook's), taken with the chip, never stamped by itself (operator decision, 2026-10-27). None
+  // while the IOTA box holds one, and none for a contact being edited: its log entry is unchanged.
+  const [lookupTick, setLookupTick] = useState(0)
+  const iotaOffer = useIotaOffer(draft.call, draft.iota, lookupTick, !showForm || editing != null)
+
   // QRZ lookup for the QSO being logged: fills grid (subscriber-only) + shows the
   // operator name. On-demand (QRZ free tier is ~100/day), one lookup per click.
   const onQrzLookup = async () => {
@@ -517,6 +537,7 @@ export function Logbook({
     const r = await withErrorToast(() => qrzLookup(call), t('callbook.lookupFailed'))
     setQrzBusy(false)
     if (r) {
+      setLookupTick((n) => n + 1)
       if (r.grid && !draft.grid.trim()) setField('grid', r.grid)
       const preferredName = r.nickname || r.name
       if (preferredName && !draft.name.trim()) setField('name', preferredName)
@@ -579,6 +600,48 @@ export function Logbook({
       throw new Error(failureText(t('qso.history.undo.failed'), err))
     })
     sayUndone(answer, done, load)
+    load()
+  }
+
+  // #348: ONE button for the confirmation downloads set up — LoTW and eQSL, one after another,
+  // through the same commands their own button and Settings run — and one toast that says what each
+  // one did. A service not set up is not asked (by its username).
+  //
+  // ⚠️ NOT the QRZ sync. It is two-way: it fetches the whole QRZ logbook and ADDS the contacts logged
+  // elsewhere, which a button named for confirmations must not do. It keeps its own button.
+  //
+  // One download at a time: while this runs, LoTW's own button waits, and the other way round.
+  const [fetching, setFetching] = useState<'all' | 'lotw' | null>(null)
+  const fetchingAll = fetching === 'all'
+  const onDownloadConfirmations = async () => {
+    if (fetching) return
+    setFetching('all')
+    const s = await withErrorToast(() => getSettings(), t('logbook.confirmations.all.label'))
+    if (!s) {
+      setFetching(null)
+      return
+    }
+    const sources: [string, () => Promise<{ newlyConfirmedAny: number }>][] = []
+    if (s.lotwUsername.trim()) sources.push(['LoTW', downloadLotwReport])
+    if (s.eqslUsername.trim()) sources.push(['eQSL', downloadEqslReport])
+    if (sources.length === 0) {
+      setFetching(null)
+      pushToast(t('logbook.confirmations.all.none'), 'info', 8000)
+      return
+    }
+    const said: string[] = []
+    let failed = false
+    for (const [service, run] of sources) {
+      try {
+        const r = await run()
+        said.push(t('logbook.confirmations.all.ok', { service, confirmed: r.newlyConfirmedAny }))
+      } catch (err) {
+        failed = true
+        said.push(t('logbook.confirmations.all.failed', { service, reason: err instanceof Error ? err.message : String(err) }))
+      }
+    }
+    setFetching(null)
+    pushToast(said.join(' · '), failed ? 'error' : 'success', 10000)
     load()
   }
 
@@ -873,6 +936,42 @@ export function Logbook({
     }
   }
 
+  // Upload ONE contact to LoTW: the bulk upload's own command, TQSL and marks, given this
+  // contact's id. What the bulk leaves out (already sent, already confirmed, no time of day) is
+  // said here instead of starting TQSL. One TQSL run at a time, so it shares the bulk's busy state.
+  const onPushLotw = async (q: LoggedQso, ref: RowRef | null) => {
+    const refused = lotwOneRefusal(q)
+    if (refused === 'sent') return pushToast(t('logbook.push.lotw.already', { call: q.call }), 'info', 5000)
+    if (refused === 'confirmed') return pushToast(t('logbook.push.lotw.confirmed', { call: q.call }), 'info', 5000)
+    if (refused === 'timeless') return pushToast(t('logbook.push.lotw.timeless', { call: q.call }), 'info', 6000)
+    if (!ref) return
+    setUploading(true)
+    const r = await withErrorToast(() => uploadLotwReportByIds([ref.id]), t('logbook.lotw.upload.failed'))
+    setUploading(false)
+    if (!r) return
+    if (r.outcome === 'pending') pushToast(t('logbook.push.lotw.ok', { call: q.call }), 'success', 5000)
+    else if (r.outcome === 'duplicate') pushToast(t('logbook.push.lotw.duplicate', { call: q.call }), 'success', 5000)
+    else if (r.outcome === 'none') pushToast(t('logbook.push.lotw.none', { call: q.call }), 'info', 6000)
+    else if (r.outcome === 'retry') pushToast(r.detail || t('logbook.lotw.upload.retry'), 'error')
+    else if (r.outcome === 'authfail')
+      pushToast(
+        r.detail
+          ? t('logbook.lotw.upload.authFailedDetail', { detail: r.detail })
+          : t('logbook.lotw.upload.authFailed'),
+        'error',
+      )
+    else
+      pushToast(
+        r.detail
+          ? t('logbook.lotw.upload.failedDetail', { detail: r.detail })
+          : t('logbook.lotw.upload.failed'),
+        'error',
+      )
+    const skipped = lotwSkipNote(r)
+    if (skipped) pushToast(skipped, 'info', LOTW_SKIP_TOAST_MS)
+    load()
+  }
+
   // Manual (re-)push of one logged QSO to World Radio League — same role as the
   // HRDLog button. A live-logging service, not an ARRL confirmation source.
   const onPushWrl = async (q: LoggedQso) => {
@@ -933,6 +1032,21 @@ export function Logbook({
         via
           ? t('logbook.qsl.marked', { call: q.call, via: qslViaLabel(via) ?? via })
           : t('logbook.qsl.sentCleared', { call: q.call }),
+        'success',
+      )
+      load()
+    }
+  }
+
+  // Queue — or unqueue — a paper card for the contact (ADIF `QSL_SENT=Q`): the Cards to send list
+  // prints its label and marks it sent once the operator says the labels printed.
+  const onQueueCard = async (q: LoggedQso, ref: RowRef | null, queued: boolean) => {
+    if (!ref) return
+    const answer = await withErrorToast(() => queueQslCardById(ref, queued), t('logbook.qsl.markFailed'))
+    if (answer && changeMade(answer, q.call)) {
+      // Two literal keys, not one interpolated one — same reason as onMarkQslCard below.
+      pushToast(
+        queued ? t('logbook.qsl.queued', { call: q.call }) : t('logbook.qsl.unqueued', { call: q.call }),
         'success',
       )
       load()
@@ -1362,7 +1476,7 @@ export function Logbook({
 
   // THE KEYBOARD GRID (v2 §6). The list is ONE Tab stop — a row, held by id so the operator's place
   // survives a newer order — and grid-local keys move it (no global shortcuts): ↑/↓ a row, PgUp/PgDn
-  // a visible page, Home/End the first/last contact; Enter edits the contact, Delete asks the
+  // a visible page, Home/End the first/last contact; Enter opens its contact card, Delete asks the
   // existing delete question, Esc closes the form (the question closes itself). A key on a row's own
   // control (its QSL menu, its buttons) stays that control's. The row the keys land on is scrolled
   // in whole, under the pinned search box and headers, and focused once it is drawn; a row whose
@@ -1370,13 +1484,13 @@ export function Logbook({
   const keysId = useId()
   const [focusKey, setFocusKey] = useState<string | null>(null)
   const [focusTo, setFocusTo] = useState<number | null>(null)
-  /** The row whose Enter opened the form (the keyboard goes back to it when it closes), and
+  /** The row whose pencil opened the form (the keyboard goes back to it when it closes), and
    *  whether the keyboard is still to go INTO the form. */
   const formFromGrid = useRef<string | null>(null)
   const formWanted = useRef(false)
+  const formRef = useRef<HTMLFormElement>(null)
   /** A contact deleted from the keys: the focus waits for the row that takes its place. */
   const focusAfter = useRef<string | null>(null)
-  const formRef = useRef<HTMLFormElement>(null)
   /** The pinned search box + headers' height, as of the last commit. */
   const stickyH = useRef(0)
   /** Where rows start to be SEEN, in the list's coordinates, at scroll `top`: under the sticky
@@ -1456,9 +1570,9 @@ export function Logbook({
           setFocusTo(index)
         })
       } else {
-        formFromGrid.current = row.key
-        formWanted.current = true
-        startEdit(row.q, row.key, row.ref)
+        // Enter opens the row's contact card, as a double-click does; its pencil still opens the
+        // edit form.
+        setCard({ row: row.q, ref: row.ref })
       }
     }
   }
@@ -1481,7 +1595,7 @@ export function Logbook({
     el.focus({ preventScroll: true })
     if (!el.classList.contains('placeholder')) setFocusTo(null)
   })
-  // Enter from the grid: the keyboard goes into the form, and back to that row when it closes.
+  // A row's pencil: the keyboard goes into the form, and back to that row when it closes.
   useEffect(() => {
     if (showForm && formWanted.current) {
       formWanted.current = false
@@ -1494,7 +1608,6 @@ export function Logbook({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- on the form opening and closing only
   }, [showForm])
-
   // The swapped-in order is placed after the render that shows it, before the browser paints —
   // its open rows' heights moved first, so the list is laid out, and placed, as the rows are.
   // (Declared before the swap below: effects run in order, so the swap's own render has passed.)
@@ -1636,6 +1749,59 @@ export function Logbook({
     return () => ro.disconnect()
   })
 
+  /** THE ONE SAVE of an edit to a logged contact — the edit form's and the contact card's: one change
+   *  through `editQsoById` (one history entry, one Undo), and the toast for each answer. A refusal
+   *  changed nothing; the caller shows the contact as it now is. */
+  const saveEdit = async (ref: RowRef, edit: QsoEdit, fields: FieldEdit[], call: string): Promise<RowAnswer | null> => {
+    const answer = await withErrorToast(
+      // The form's save sends no field changes, and its command is exactly the one it always was.
+      () => (fields.length ? editQsoById(ref, edit, fields) : editQsoById(ref, edit)),
+      t('logbook.form.saveFailed'),
+    )
+    if (!answer) return null
+    if (answer.kind === 'busy') {
+      // The logbook was too busy to take it: nothing saved, and what was typed stays, so Save
+      // again tries the same change against the same version.
+      pushToast(t('logbook.change.busy', { call }), 'error', 8000)
+    } else if (answer.kind === 'changed') {
+      // Changed since it was opened (another window, or a sync): nothing was saved.
+      pushToast(t('logbook.change.changed', { call }), 'error', 8000)
+      load()
+    } else if (answer.kind === 'gone') {
+      pushToast(t('logbook.change.gone', { call }), 'error', 8000)
+      load()
+    } else {
+      pushToast(t('logbook.form.updated', { call: edit.call }), 'success')
+      load()
+    }
+    return answer
+  }
+
+  /** Open the contact card on the contact `id`, as the engine holds it now. */
+  const openCard = (id: string) => {
+    void keyedRow(id)
+      .catch(() => null)
+      .then((found) => {
+        if (!alive.current) return
+        if (found) setCard({ row: found.row, ref: { id, editKey: found.editKey } })
+        else {
+          setCard(null)
+          pushToast(t('logbook.form.editGone', { call: card?.row.call ?? '' }), 'error')
+        }
+      })
+  }
+
+  /** The contact `id` read again onto the card — only while the card is still open on it (a Redo
+   *  pressed in a toast after the card closed opens nothing). */
+  const reloadCard = (id: string) => {
+    void keyedRow(id)
+      .catch(() => null)
+      .then((found) => {
+        if (!alive.current || !found) return
+        setCard((c) => (c?.row.id === id ? { row: found.row, ref: { id, editKey: found.editKey } } : c))
+      })
+  }
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const call = draft.call.trim().toUpperCase()
@@ -1773,37 +1939,25 @@ export function Logbook({
         qslSentVia: (draft.qslSentVia || null) as QsoEdit['qslSentVia'],
         qslCard: draft.qslCard === '1',
       }
-      const answer = await withErrorToast(() => editQsoById(ref, edit), t('logbook.form.saveFailed'))
-      if (!answer) return
-      if (answer.kind === 'busy') {
-        // The logbook was too busy to take it: nothing saved, and the form keeps what was typed,
-        // so Save again tries the same change against the same version.
-        pushToast(t('logbook.change.busy', { call: existing.call }), 'error', 8000)
-        return
-      }
+      const answer = await saveEdit(ref, edit, [], existing.call)
+      if (!answer || answer.kind === 'busy') return
       if (answer.kind === 'changed') {
-        // Changed since the form opened (another window, or a sync): nothing was saved. The form
-        // now shows the contact as it is, and a save from it goes against that version.
-        pushToast(t('logbook.change.changed', { call: existing.call }), 'error', 8000)
+        // The form now shows the contact as it is, and a save from it goes against that version.
         startEdit(answer.current.row, editing.key, { id: ref.id, editKey: answer.current.editKey })
-        load()
         return
       }
       if (answer.kind === 'gone') {
-        pushToast(t('logbook.change.gone', { call: existing.call }), 'error', 8000)
         cancelForm()
-        load()
         return
       }
-      pushToast(t('logbook.form.updated', { call: record.call }), 'success')
       cancelForm()
       setDraft((prev) => ({ ...prev, call: '', grid: '', rstSent: '', rstRcvd: '', name: '', qth: '', comment: '', notes: '', whenDate: '', whenTime: '', endTime: '', state: '', txPower: '', parkTheirRef: '', parkMyRef: '', iota: '', myGrid: '', myRig: '', qslSentVia: '', qslCard: '' }))
-      load()
       return
     }
-    const snap = await withErrorToast(() => logQso(record), t('logbook.form.logFailed'))
+    const snap = await withErrorToast(() => logQso(record, undefined, iotaOffer.taken), t('logbook.form.logFailed'))
     if (snap) {
       load()
+      iotaOffer.reset()
       setShowForm(false)
       setDraft((prev) => ({ ...prev, call: '', grid: '', rstSent: '', rstRcvd: '', name: '', qth: '', comment: '', notes: '', whenDate: '', whenTime: '', endTime: '', state: '', txPower: '', iota: '', myGrid: '', myRig: '' }))
       // QRZ/ClubLog/eQSL auto-upload happens in the BACKEND log funnel now
@@ -1861,9 +2015,108 @@ export function Logbook({
     if (!e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || c.id === 'actions') return
     e.preventDefault()
     e.stopPropagation()
+    if (e.shiftKey) return moveByKey(c, e.key === 'ArrowLeft' ? -1 : 1, e.currentTarget.parentElement)
     const step = e.key === 'ArrowLeft' ? -RESIZE_STEP_PX : RESIZE_STEP_PX
     changeColumns(withColumnWidth(colChoice, c.id, widthOf(c, e.currentTarget) + step, windowPx))
   }
+
+  // MOVING A COLUMN. A header pressed and dragged sideways past MOVE_SLOP_PX is a move: on release
+  // the column goes to the near side of the header under the pointer, and the order is saved with
+  // the rest of the choice, once. A press that never travels is the click it always was, and sorts;
+  // the click that ends a drag is swallowed, so a move never sorts. The action cluster stays last.
+  // Alt+Shift+←/→ on a focused header does the same a place at a time, and says where it went.
+  const moveStart = useRef<{ id: string; x: number; dragging: boolean } | null>(null)
+  const swallowClick = useRef(false)
+  const [moving, setMoving] = useState<{ id: string; over: string; side: 'before' | 'after' } | null>(null)
+  const saidMoved = (next: LogColumnsSaved, id: string) => {
+    const shown = renderedColumns(next, narrowWindow)
+    const c = shown.find((x) => x.id === id)
+    if (c) announce(t('logbook.columns.moved', { column: columnLabel(c), place: shown.indexOf(c) + 1, count: shown.length }))
+  }
+  // The header a keyboard move was made on keeps the focus through the re-render that moves it (a
+  // node React re-inserts loses focus), so the next Alt+Shift+arrow carries on from it.
+  const refocusHeader = useRef<{ row: Element; id: string } | null>(null)
+  useLayoutEffect(() => {
+    const r = refocusHeader.current
+    if (!r) return
+    refocusHeader.current = null
+    const el = r.row.querySelector<HTMLElement>(`:scope > [data-col="${r.id}"]`)
+    if (!el) return
+    if (document.activeElement !== el) el.focus({ preventScroll: true })
+    // A move can carry the header past the edge of a table wider than its panel: bring it back
+    // into view inside the table, moving nothing when it is already there. (jsdom has none.)
+    el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [cols])
+  const moveByKey = (c: LogColumn, dir: -1 | 1, row: Element | null) => {
+    const next = withColumnStep(colChoice, cols, c.id, dir)
+    if (next === colChoice) {
+      const column = columnLabel(c)
+      announce(dir < 0 ? t('logbook.columns.atFirst', { column }) : t('logbook.columns.atLast', { column }))
+      return
+    }
+    if (row) refocusHeader.current = { row, id: c.id }
+    changeColumns(next)
+    saidMoved(next, c.id)
+  }
+  /** The header under `x` and which half of it, among the header row's cells. */
+  const dropAt = (row: Element | null, x: number): { over: string; side: 'before' | 'after' } | null => {
+    const cells = row ? [...row.querySelectorAll<HTMLElement>(':scope > [data-col]')] : []
+    if (!cells.length) return null
+    const boxes = cells.map((el) => ({ id: el.dataset.col!, r: el.getBoundingClientRect() }))
+    const hit =
+      boxes.find((b) => x >= b.r.left && x < b.r.right) ?? (x < boxes[0].r.left ? boxes[0] : boxes[boxes.length - 1])
+    return { over: hit.id, side: x < hit.r.left + hit.r.width / 2 ? 'before' : 'after' }
+  }
+  const moveHandlers = (c: LogColumn) => ({
+    'data-col': c.id,
+    ...(c.id === 'actions'
+      ? {}
+      : {
+          onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+            swallowClick.current = false
+            if (e.button !== 0) return
+            moveStart.current = { id: c.id, x: e.clientX, dragging: false }
+            // Held from the press, so a quick flick that leaves the header in one move is still its drag.
+            e.currentTarget.setPointerCapture?.(e.pointerId)
+          },
+          onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+            const m = moveStart.current
+            if (!m || m.id !== c.id) return
+            if (!m.dragging) {
+              if (Math.abs(e.clientX - m.x) <= MOVE_SLOP_PX) return
+              m.dragging = true
+            }
+            const at = dropAt(e.currentTarget.parentElement, e.clientX)
+            setMoving(at && { id: c.id, ...at })
+          },
+          onPointerUp: (e: React.PointerEvent<HTMLElement>) => {
+            const m = moveStart.current
+            moveStart.current = null
+            setMoving(null)
+            if (!m || m.id !== c.id || !m.dragging) return
+            swallowClick.current = true
+            const at = dropAt(e.currentTarget.parentElement, e.clientX)
+            if (!at || at.over === c.id) return
+            const next = withColumnMoved(colChoice, c.id, at.over, at.side)
+            if (next === colChoice) return
+            changeColumns(next)
+            saidMoved(next, c.id)
+          },
+          onPointerCancel: () => {
+            moveStart.current = null
+            setMoving(null)
+          },
+        }),
+  })
+  /** The header's own class for a move in progress: the one carried, and the drop mark. */
+  const moveClass = (c: LogColumn) =>
+    !moving
+      ? ''
+      : c.id === moving.id
+        ? ' moving'
+        : c.id === moving.over
+          ? ` drop-${moving.side}`
+          : ''
   const columnLabel = (c: LogColumn) => (c.id === 'qsl' ? QSL_HEADER : columnName(c))
   // The edit form's read-only line: the added columns the form has no box for, where the contact
   // holds a value.
@@ -1908,11 +2161,20 @@ export function Logbook({
       <button
         key={c.id}
         type="button"
-        className={`log-cell log-th${at ? ' sorted' : ''}`}
+        className={`log-cell log-th${at ? ' sorted' : ''}${moveClass(c)}`}
         role="columnheader"
         aria-sort={at?.place === 1 ? (at.asc ? 'ascending' : 'descending') : 'none'}
         title={t('logbook.sort.shiftHint')}
-        onClick={(e) => setSort((cur) => clickSort(cur, k, e.shiftKey, defaultAsc))}
+        {...moveHandlers(c)}
+        onClick={(e) => {
+          // Only a pointer's click (detail ≥ 1) ends a drag. Enter or Space on the header clicks with
+          // detail 0, and sorts even when a drag ended outside the header and left the flag set.
+          if (swallowClick.current && e.detail !== 0) {
+            swallowClick.current = false
+            return
+          }
+          setSort((cur) => clickSort(cur, k, e.shiftKey, defaultAsc))
+        }}
         onKeyDown={(e) => resizeByKey(e, c)}
       >
         {columnLabel(c)}
@@ -2000,14 +2262,26 @@ export function Logbook({
           <button
             type="button"
             className="export-btn"
+            onClick={() => void onDownloadConfirmations()}
+            disabled={fetching !== null}
+            title={t('logbook.confirmations.all.title')}
+          >
+            {fetchingAll ? t('logbook.confirmations.all.busy') : t('logbook.confirmations.all.label')}
+          </button>
+          <button
+            type="button"
+            className="export-btn"
+            disabled={fetching !== null}
             onClick={async () => {
               // The authenticated in-app LoTW download also existed but hid in Settings
               // (same story as QRZ, same day): fetches lotwreport.adi with the keychain
               // credentials + the incremental high-water cursor, merges confirmations.
+              if (fetching) return
+              setFetching('lotw')
               const r = await withErrorToast(
                 () => downloadLotwReport(),
                 t('logbook.fetchLotw.failed'),
-              )
+              ).finally(() => setFetching(null))
               if (r) {
                 pushToast(
                   t('logbook.fetchLotw.done', {
@@ -2293,6 +2567,14 @@ export function Logbook({
           >
             {showForm ? t('logbook.form.close') : t('logbook.form.open')}
           </button>
+          <button
+            type="button"
+            className="export-btn"
+            onClick={() => setShowCards(true)}
+            title={t('logbook.qslCards.buttonTitle')}
+          >
+            {t('logbook.qslCards.button')}
+          </button>
           <button type="button" className="export-btn" onClick={() => setShowDeleted(true)}>
             {t('logbook.deleted.button')}
           </button>
@@ -2473,6 +2755,8 @@ export function Logbook({
                 aria-invalid={!!draft.iota.trim() && !IOTA_RE.test(draft.iota.trim().toUpperCase())}
                 title={t('logbook.field.iota.title')}
               />
+              <IotaReferenceNote reference={draft.iota} />
+              <IotaOfferChip state={iotaOffer} />
             </label>
             <label className="logbook-field">
               <span>{t('logbook.field.name.label')}</span>
@@ -2481,10 +2765,6 @@ export function Logbook({
             <label className="logbook-field">
               <span>{t('logbook.field.qth.label')}</span>
               <input className="settings-input" value={draft.qth} onChange={(e) => setField('qth', e.target.value)} autoComplete="off" />
-            </label>
-            <label className="logbook-field">
-              <span>{t('logbook.field.comment.label')}</span>
-              <input className="settings-input" value={draft.comment} onChange={(e) => setField('comment', e.target.value)} placeholder={t('logbook.field.comment.placeholder')} autoComplete="off" />
             </label>
             {/* #239: your own location and rig for THIS contact (ADIF MY_GRIDSQUARE / MY_RIG). */}
             <>
@@ -2543,6 +2823,27 @@ export function Logbook({
                 </label>
               </>
             )}
+            {/* The shared comment: full width, always directly above Notes (it was a 140 px cell
+                among the short fields). It wraps over lines but holds ONE, as ADIF's COMMENT does:
+                a line break typed or pasted lands as a space, and Enter saves as the old box did.
+                A stored comment with line breaks (an import's) is shown and saved as it is unless
+                the operator edits this box. */}
+            <label className="logbook-field logbook-field-wide">
+              <span>{t('logbook.field.comment.label')}</span>
+              <textarea
+                className="settings-input logbook-comment"
+                value={draft.comment}
+                onChange={(e) => setField('comment', oneLineTyped(e.target))}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return
+                  e.preventDefault()
+                  e.currentTarget.form?.requestSubmit()
+                }}
+                placeholder={t('logbook.field.comment.placeholder')}
+                rows={2}
+                autoComplete="off"
+              />
+            </label>
             <label className="logbook-field logbook-field-wide">
               <span>{t('logbook.field.notes.label')}</span>
               <textarea
@@ -2575,6 +2876,10 @@ export function Logbook({
             {editingKey !== null && (
               <span className="logbook-editing-note">{t('logbook.form.editingNote')}</span>
             )}
+            {/* #239: leave the form without saving, as Esc does. */}
+            <button type="button" className="logconfirm-discard" onClick={cancelForm}>
+              {t('logbook.form.cancel')}
+            </button>
             <button type="submit" className="settings-save" disabled={!draft.call.trim()}>
               {editingKey !== null ? t('logbook.form.save') : t('logbook.form.log')}
             </button>
@@ -2595,7 +2900,8 @@ export function Logbook({
         {/* The grid's keys, for a screen reader: four whole sentences, never one glued. */}
         <p id={keysId} className="sr-only">
           <span>{t('logbook.keys.move')}</span> <span>{t('logbook.keys.edit')}</span>{' '}
-          <span>{t('logbook.keys.delete')}</span> <span>{t('logbook.keys.close')}</span>
+          <span>{t('logbook.keys.delete')}</span> <span>{t('logbook.keys.close')}</span>{' '}
+          <span>{t('logbook.columns.moveHint')}</span>
         </p>
         <div className="log-scroll" ref={scrollRef}>
           {globeShown && (
@@ -2672,21 +2978,29 @@ export function Logbook({
               Time header sort on the SAME key, because a record carries ONE instant: there is no
               ordering by time of day that ignores the date, and a header that looks like its
               neighbours while doing nothing is worse than two that say they order the same thing.
-              Free-text columns do not sort: sorting a log by remark answers no question an
-              operator asks. Of the passthrough tags only the county sorts, which has an index. */}
+              Every other column that shows data sorts too (an operator looking for a contact by
+              its end time had no way to), with a row empty in the column last either way; only
+              the action cluster has no order. */}
           {cols.map((c) =>
             c.sort ? (
               th(c, c.sort)
             ) : c.id === 'actions' ? (
-              <span key={c.id} className="log-cell" role="columnheader" aria-label={t('logbook.column.actions')}></span>
+              <span
+                key={c.id}
+                className={`log-cell${moveClass(c)}`}
+                role="columnheader"
+                aria-label={t('logbook.column.actions')}
+                {...moveHandlers(c)}
+              ></span>
             ) : (
               <span
                 key={c.id}
-                className="log-cell"
+                className={`log-cell${moveClass(c)}`}
                 role="columnheader"
                 // An added column's header takes the keyboard's resize (Alt+←/→); a default one
                 // keeps the tab order it always had.
                 tabIndex={c.base ? undefined : 0}
+                {...moveHandlers(c)}
                 onKeyDown={(e) => resizeByKey(e, c)}
               >
                 {columnLabel(c)}
@@ -2836,7 +3150,7 @@ export function Logbook({
                               ⚠️ `timeKnown: false` is an imported record whose source carried a DATE and
                               no time; `whenUnix` anchors it at midnight FOR ORDERING and its clock
                               reading is an artefact. The combined column printed that artefact as fact —
-                              a column of its own cannot. `QsoDetail` already refuses the same thing, and
+                              a column of its own cannot. the contact card already refuses the same thing, and
                               a bare 00:00 read as fact is what leaves those contacts unmatched at LoTW
                               and eQSL forever. */}
                           <span
@@ -3109,6 +3423,16 @@ export function Logbook({
                             >
                               {WRL_LABEL}
                             </button>
+                            <button
+                              type="button"
+                              className="log-rowbtn"
+                              onClick={() => void onPushLotw(q, ref)}
+                              disabled={uploading}
+                              title={t('logbook.row.pushLotw.title', { call: q.call })}
+                              aria-label={t('logbook.row.pushLotw.aria', { call: q.call })}
+                            >
+                              {LOTW_LABEL}
+                            </button>
                             {/* QSL handling for the row: mark a request SENT (once), and record the
                                 paper card that came BACK. Operator-declared, not a confirmation.
                                 
@@ -3131,7 +3455,7 @@ export function Logbook({
                               style={{ fontSize: '0.85em' }}
                               value=""
                               onChange={(e) => {
-                                const v = e.target.value as 'B' | 'D' | 'E' | 'R' | 'r' | 's' | ''
+                                const v = e.target.value as 'B' | 'D' | 'E' | 'R' | 'r' | 's' | 'Q' | 'q' | ''
                                 // R/r/s are NOT ADIF letters — they are this menu's own entries for
                                 // the RECEIVED card (#152), which has no QSL_SENT_VIA code because it
                                 // is not a send at all, and for CLEARING the send (#180). Kept in the
@@ -3140,6 +3464,9 @@ export function Logbook({
                                 if (v === 'R') void onMarkQslCard(q, ref, true)
                                 else if (v === 'r') void onMarkQslCard(q, ref, false)
                                 else if (v === 's') void onMarkQslSent(q, ref, null)
+                                // Q/q: the cards-to-send queue (ADIF QSL_SENT=Q), in and out.
+                                else if (v === 'Q') void onQueueCard(q, ref, true)
+                                else if (v === 'q') void onQueueCard(q, ref, false)
                                 else if (v) void onMarkQslSent(q, ref, v as 'B' | 'D' | 'E')
                               }}
                               title={t('logbook.row.qslSent.title', { call: q.call })}
@@ -3153,6 +3480,11 @@ export function Logbook({
                                   <option value="B">{t('logbook.row.qslSent.bureau')}</option>
                                   <option value="D">{t('logbook.row.qslSent.direct')}</option>
                                   <option value="E">{t('logbook.row.qslSent.electronic')}</option>
+                                  {cardQueued(q) ? (
+                                    <option value="q">{t('logbook.row.qslQueue.remove')}</option>
+                                  ) : (
+                                    <option value="Q">{t('logbook.row.qslQueue.add')}</option>
+                                  )}
                                 </>
                               )}
                               {/* ...and the way back out of it (#180). It has to be shown on exactly
@@ -3213,7 +3545,11 @@ export function Logbook({
                             <button
                               type="button"
                               className="log-rowbtn"
-                              onClick={() => startEdit(q, key, ref)}
+                              onClick={() => {
+                                formFromGrid.current = key
+                                formWanted.current = true
+                                startEdit(q, key, ref)
+                              }}
                               title={t('logbook.row.edit', { call: q.call })}
                               aria-label={t('logbook.row.edit', { call: q.call })}
                             >
@@ -3247,7 +3583,7 @@ export function Logbook({
                     // callsign selectable so it can still be copied, and is the idiom this app
                     // already uses in the decoded text (#262). The row title carries it,
                     // because the affordance is otherwise invisible.
-                    onDoubleClick={() => setViewing(q)}
+                    onDoubleClick={() => setCard({ row: q, ref })}
                     // Ctrl/⌘-click picks the row for "Export selected", Shift-click a run — on the
                     // row itself, never through one of its controls.
                     onClick={(e) => {
@@ -3474,8 +3810,17 @@ export function Logbook({
       />
       {/* Mounted beside SpotDialog at the section root, not inside the virtualised rows:
           the row that opened it can be recycled out from under the view while it is open. */}
-      <QsoDetail qso={viewingRow === undefined ? viewing : viewingRow} longwaveConfigured={longwaveConfigured}
-        onClose={() => setViewing(null)} onChanged={load} />
+      <ContactCard
+        open={card}
+        longwaveConfigured={longwaveConfigured}
+        onClose={() => setCard(null)}
+        onSwitch={openCard}
+        save={saveEdit}
+        onChanged={load}
+        onReload={reloadCard}
+        logTick={logTick}
+      />
+      <QslCardsToSend open={showCards} onClose={() => setShowCards(false)} onChanged={load} />
       <RecentlyDeleted open={showDeleted} onClose={() => setShowDeleted(false)} onRestored={load} />
       <LogTools
         open={tools !== null}

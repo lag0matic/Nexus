@@ -36,7 +36,7 @@ import {
   withLastCountyPart,
 } from '../features/countyLine'
 import { composingSlot } from '../features/contestExchange'
-import { readLogDraft, writeLogDraft } from '../features/logDraft'
+import { BLANK_LINE, readLogDraft, writeLogDraft, type BandClearedLine, type LineContext, type LogDraft } from '../features/logDraft'
 import { CALL_HISTORY_SOURCE, SCP_SOURCE, useCallHistory, useScpList } from '../features/contestLists'
 import { scpLine } from '../features/scp'
 import { callCardTrigger } from './CallCard'
@@ -62,7 +62,8 @@ import { RecallPanel } from './RecallPanel'
 import { ContestScoreChip } from './ContestScoreChip'
 import { pushToast, withErrorToast } from '../toast'
 import { isStreamInput } from '../remote-native/stream-input'
-import { normaliseTyped, upperTyped } from '../typedInput'
+import { normaliseTyped, oneLineTyped, upperTyped } from '../typedInput'
+import { IotaOfferChip, useIotaOffer } from './Iota'
 
 // ---------------------------------------------------------------------------
 // THE DYNAMIC ENTRY STRIP (spec §9) — Call plus one box per slot the session's role
@@ -360,6 +361,22 @@ interface Props {
   onEntryCall?: (call: string) => void
   /** Called when the entry is cleared for the next contact: after one is logged, or by ✕. */
   onReset?: () => void
+  /**
+   * A host's question about a contact, answered "log it" by the operator (JTTY's Log QSO prompt
+   * after a TU): a new `id` per press. The strip logs ONLY the station it names: when the strip's
+   * call is `call` (trimmed, uppercased) and it could log, `claim` is asked (the host's guard
+   * against a second screen logging the same contact) and on true the strip logs exactly as its
+   * own Log does. Otherwise it logs nothing: an empty strip is filled with `call` for the operator
+   * to check and press again, and a strip holding another call is left as it is. An empty `call`
+   * names no station, so the strip's own is logged. The outcome is reported to `onLogRequest`;
+   * after `logging`, `refused` follows when the log then logged nothing (the logger window's entry
+   * moved on, the log refused it), so the host can give its claim back.
+   */
+  logRequest?: { id: number; call: string; claim: () => Promise<boolean> } | null
+  onLogRequest?: (
+    id: number,
+    outcome: { kind: 'logging' | 'filled' | 'not-ready' | 'taken' | 'refused' } | { kind: 'other-call'; held: string },
+  ) => void
   /** Called with the snapshot `clearHuntTarget` answered, after the hunt tag's ✕ ended the hunt, so
    *  the host applies it at once: the POTA / SOTA view's `onSnap`, for its banner ✕. */
   onSnap?: (s: AppSnapshot) => void
@@ -481,6 +498,14 @@ interface Props {
    * host re-enters the contest in S&P (never a CQ). App passes it only while that is so.
    */
   onResumeContest?: () => void
+  /**
+   * The Phone, CW and digital cockpits: a BAND CHANGE (`snap.bandChangeTick`, any route) sets an
+   * un-logged line aside, every box of it, because the station is not on the new band (operator
+   * ruling, 2026-10-26). A notice with Restore puts it back, to log on the band it was made on. A
+   * contact being logged is never touched, nor a line for another radio (the override); one open
+   * for edit is set aside as the edit closes. Absent (Satellites): nothing clears.
+   */
+  clearCallOnBandChange?: boolean
 }
 
 /**
@@ -508,6 +533,8 @@ export function LogEntry({
   onCallChange,
   onEntryCall,
   onReset,
+  logRequest,
+  onLogRequest,
   onSnap,
   fieldDay,
   fdMode,
@@ -523,12 +550,17 @@ export function LogEntry({
   operatorBox,
   draft,
   onResumeContest,
+  clearCallOnBandChange = false,
 }: Props) {
   const remoteMode = remote != null
   type DraftContext = { band: string; freqMhz: number; mode: string }
   const [remoteDraftContext, setRemoteDraftContext] = useState<DraftContext | null>(null)
   const [remoteWorkOffer, setRemoteWorkOffer] = useState<({ call: string; ts: number } & { context: DraftContext }) | null>(null)
-  const currentDraftContext = (): DraftContext => ({ band: snap.radio.band, freqMhz: snap.radio.dialMhz, mode })
+  // The frequency a contact logged now is on: the dial, plus the host's audio offset where it logs
+  // one (`logOffsetHz`), to the hertz. A Remote draft captures the same frequency.
+  const liveFreqMhz =
+    logOffsetHz == null ? snap.radio.dialMhz : Math.round(snap.radio.dialMhz * 1e6 + logOffsetHz) / 1e6
+  const currentDraftContext = (): DraftContext => ({ band: snap.radio.band, freqMhz: liveFreqMhz, mode })
   const rememberRemoteContext = () => {
     if (remoteMode) setRemoteDraftContext(current => current ?? currentDraftContext())
   }
@@ -1428,6 +1460,169 @@ export function LogEntry({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parkPlacesKey])
 
+  // ⭐ A BAND CHANGE SETS THE UN-LOGGED LINE ASIDE (`clearCallOnBandChange`). EVERY box goes, not
+  // just the call: a name, a comment or a report left behind would be logged against the next call
+  // typed, on a line that looks fresh. The line is kept whole (`BandClearedLine`: the boxes, the
+  // call's start time, the callbook fill and its owner, the contest exchange and its call-history
+  // marks) with the band, frequency and mode it was made on, read from the render BEFORE the change
+  // (`lineContextRef`). The notice and its Restore last until the operator restores, dismisses it,
+  // or logs that very contact by hand (`loggedFromStrip`); typing or logging another call does not
+  // end them, and they come back
+  // with the cockpit after a page switch (the draft keeps them). A later band change with nothing in
+  // the line leaves them as they are; one with another line in it sets that one aside instead.
+  // Restore puts the line back over whatever is in it, and the contact logs on the band it was made
+  // on (`restoredContext`); a contest contact logs on the radio's band, so a contest strip offers
+  // Restore only back on that band. Declared BEFORE the click-to-work prefill below, so a spot on
+  // another band, whose QSY and call land in one render, sets the old line aside first and then
+  // takes the new call.
+  type BandCleared = BandClearedLine & { fdFields: Record<string, string>; fill: FillState }
+  const [bandCleared, setBandCleared] = useState<BandCleared | null>(() =>
+    kept?.bandCleared ? { ...kept.bandCleared, fdFields: {}, fill: EMPTY_FILL } : null,
+  )
+  // The contact a Restore put back logs with the context it was made in, while that call is the
+  // one in the line.
+  const [restoredContext, setRestoredContext] = useState<(LineContext & { call: string }) | null>(kept?.restored ?? null)
+  // A draft remembers the count it was kept at, so a band change made while this cockpit was away
+  // (on the FT screen, say) sets the line aside when the strip comes back, as it would have here.
+  const bandTickSeen = useRef(kept?.bandChangeTick ?? snap.bandChangeTick)
+  // Where the radio was at the last render: the band, frequency and mode the line was being made
+  // on. Updated by the effect declared just AFTER the band-change effect, so that effect still
+  // reads the render before the change. A draft brings back where it was kept.
+  const lineContextRef = useRef<LineContext | null>(kept?.context ?? null)
+  // A band change that came while a contact's edit had the line's place: done as the edit closes.
+  const bandClearPending = useRef<LineContext | null>(null)
+  /** The line as it stands, every box of it — what a draft keeps and a band change sets aside. */
+  const currentLine = (): LogDraft => ({
+    call: logCall,
+    rstSent: logRstSent,
+    rstRcvd: logRstRcvd,
+    name: logName,
+    qth: logQth,
+    comment: logComment,
+    notes: logNotes,
+    grid: logGrid,
+    state: stateBoxRef.current,
+    stateSource: stateSourceRef.current,
+    callbookState,
+    country: logCountry,
+    image: logImage,
+    parkProgram: logParkProgram,
+    parkRef: parkBoxRef.current,
+    parkFor: parkForRef.current,
+    workPark,
+    enrichedFor: enrichedForRef.current,
+    enteredUnix: callEnteredRef.current?.unix ?? null,
+  })
+  /** Is anything in the line: the call, or any box typed without one (a name, a comment, a report).
+   *  A park a hunt put in the empty line, and the state its park put there, are not: the hunt fills
+   *  every empty line for hours, and counted, it replaced a set-aside contact at the next band change. */
+  const lineHasContent = (l: LogDraft) =>
+    [l.call, l.name, l.qth, l.comment, l.notes, l.grid].some((v) => v.trim() !== '') ||
+    (l.stateSource === 'operator' && l.state.trim() !== '') ||
+    (!l.parkFor.hunt && l.parkRef.trim() !== '') ||
+    l.rstSent != null ||
+    l.rstRcvd != null
+  const setLineAside = (context: LineContext) => {
+    setBandCleared({ line: currentLine(), context, fdFields, fill: fillRef.current })
+    // As Clear does (the serial in flight released, Enter Sends Message at a new contact), and every
+    // box with it, as Alt+W's wipe does. No caret move: the operator is at the band control.
+    reset(false)
+    setFdFields({})
+  }
+  useEffect(() => {
+    const seen = bandTickSeen.current
+    bandTickSeen.current = snap.bandChangeTick
+    // Not before a snapshot has said where the count stands: the first one is no change.
+    if (!clearCallOnBandChange || seen == null || snap.bandChangeTick == null || snap.bandChangeTick === seen) return
+    // Never a contact on its way into the log, nor one for another radio (the override's band is
+    // typed, not the dial's).
+    if (!lineHasContent(currentLine()) || committing.current || overrideOpen) return
+    const context = lineContextRef.current ?? lineContextNow()
+    if (editing) {
+      bandClearPending.current ??= context
+      return
+    }
+    setLineAside(context)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.bandChangeTick])
+  useEffect(() => {
+    // Off the bands on a listen (WWV) the line is still the one being made on the band left: a
+    // band change after the listen sets it aside with that band and frequency, not with none. A
+    // restored line is still the one made on its own band: set aside again, or kept by a draft, it
+    // keeps that band.
+    const now = draftContext ?? lineContextNow()
+    if (now.band || !lineContextRef.current) lineContextRef.current = now
+  })
+  // A restored line logs on its own band while anything of it is in the line. Emptied by hand, it is
+  // gone, and a contact typed into the empty line is a new one, made on the band the radio is on.
+  useEffect(() => {
+    if (restoredContext && !lineHasContent(currentLine())) setRestoredContext(null)
+  })
+  useEffect(() => {
+    const context = bandClearPending.current
+    if (editing || !context) return
+    bandClearPending.current = null
+    if (lineHasContent(currentLine()) && !committing.current && !overrideOpen) setLineAside(context)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing])
+  /** A contact logged from this strip: the set-aside line goes only when it IS that contact (its call,
+   *  on its band). A log of another call keeps it, as the engine's Log QSO keeps its own set-aside
+   *  contact (operator ruling, 2026-10-27): it lasts until restored, dismissed or replaced by the next
+   *  band change. */
+  const loggedFromStrip = (loggedCall: string, loggedBand: string) =>
+    setBandCleared((b) =>
+      b && b.line.call.trim() && sameCall(b.line.call, loggedCall) && b.context.band.toLowerCase() === loggedBand.toLowerCase()
+        ? null
+        : b,
+    )
+  const restoreBlocked =
+    bandCleared != null && fdActive && bandCleared.context.band.toLowerCase() !== snap.radio.band.toLowerCase()
+  const restoreBandCleared = () => {
+    const b = bandCleared
+    if (!b || restoreBlocked) return
+    setBandCleared(null)
+    // Whatever the line holds now gives way, as Clear would clear it.
+    reset(false)
+    const l = b.line
+    // The callbook fill belongs to this call again, so the call-change effect keeps it.
+    enrichedForRef.current = l.enrichedFor
+    setLogCall(l.call)
+    callEnteredRef.current =
+      l.call.trim() && l.enteredUnix != null ? { call: l.call.trim().toUpperCase(), unix: l.enteredUnix } : null
+    setLogRstSent(l.rstSent)
+    setLogRstRcvd(l.rstRcvd)
+    setLogName(l.name)
+    setLogQth(l.qth)
+    setLogComment(l.comment)
+    setLogNotes(l.notes)
+    setLogGrid(l.grid)
+    setStateBox(l.state, l.stateSource)
+    setCallbookState(l.callbookState)
+    setLogCountry(l.country)
+    setLogImage(l.image)
+    setLogParkProgram(l.parkProgram)
+    parkForRef.current = l.parkFor
+    setPark(l.parkRef)
+    setParkPicked(!!l.parkRef)
+    setWorkPark(l.workPark)
+    humanCallEditRef.current = false
+    settledCallRef.current = true
+    if (fdActive) {
+      setFdFields(b.fdFields)
+      setFill(b.fill)
+    }
+    // Logged on the band it was made on. (Off the bands, a listen, there is no band to log on, and
+    // the line logs on the radio's, as it always did.)
+    if (b.context.band) {
+      if (remoteMode) setRemoteDraftContext(b.context)
+      else setRestoredContext({ ...b.context, call: l.call })
+    }
+    // The CW macros' {HISNAME}/{HISSTATE} for this call again, which the clear emptied.
+    if (!remoteMode && l.call.trim()) void setCwPeerInfo(l.call.trim(), l.name, l.state)
+    // …and the station takes the call up again, as Alt+W's put-back does.
+    if (fdActive && !remoteMode && l.call.trim()) void contestWorking(l.call.trim()).catch(() => {})
+  }
+
   // Click-to-work prefill: land the call + drop focus on RST so the operator types the report
   // and hits Enter. Keyed on `ts` to refire on re-click of the same call.
   useEffect(() => {
@@ -1661,6 +1856,13 @@ export function LogEntry({
   const newModeSlot =
     slots.workedEver && !newBandSlot && !slots.modesWorked.includes(modeKey(mode))
 
+  // The IOTA reference the station offers this call (a spot comment's, or the callbook's): shown as
+  // a chip, logged only when the operator takes it (operator decision, 2026-10-27). Asked again when
+  // a lookup here answers. Not in a contest strip, nor from a Remote browser, whose log goes by
+  // another road.
+  const [lookupTick, setLookupTick] = useState(0)
+  const iotaOffer = useIotaOffer(logCall, null, lookupTick, remoteMode || fdActive)
+
   // QRZ callbook autofill — fills ONLY blank fields, never clobbers operator input. The
   // explicit button toasts; the on-blur auto-lookup is silent on failure so an operator
   // without QRZ configured isn't nagged on every Tab.
@@ -1705,6 +1907,7 @@ export function LogEntry({
     setLogImage(r.image ?? null) // display-only; no operator value to preserve
     setCallbookState(r.state ?? '') // the recall card's, beside the callbook's town
     enrichedForRef.current = call.toUpperCase()
+    setLookupTick((n) => n + 1)
     // Feed the worked station's name/state to the engine for the {HISNAME}/{HISSTATE} CW-macro
     // tokens (keyed to the call so a stale lookup can't key the wrong name).
     void setCwPeerInfo(call, preferredName ?? '', r.state ?? '')
@@ -1799,39 +2002,31 @@ export function LogEntry({
   useEffect(() => {
     if (!draft) return
     const operators = logCall.trim() !== '' && (humanCallEditRef.current || settledCallRef.current)
+    const keepsLine = operators && !fdActive && !overrideOpen && !committing.current
+    // …and a line a band change set aside, while its Restore is on offer, with or without a line.
+    const aside = bandCleared && !fdActive ? { line: bandCleared.line, context: bandCleared.context } : undefined
     writeLogDraft(
       draft,
-      operators && !fdActive && !overrideOpen && !committing.current
+      keepsLine || aside
         ? {
-            call: logCall,
-            rstSent: logRstSent,
-            rstRcvd: logRstRcvd,
-            name: logName,
-            qth: logQth,
-            comment: logComment,
-            notes: logNotes,
-            grid: logGrid,
-            state: stateBoxRef.current,
-            stateSource: stateSourceRef.current,
-            callbookState,
-            country: logCountry,
-            image: logImage,
-            parkProgram: logParkProgram,
-            parkRef: parkBoxRef.current,
-            parkFor: parkForRef.current,
-            workPark,
-            enrichedFor: enrichedForRef.current,
-            enteredUnix: callEnteredRef.current?.unix ?? null,
+            ...(keepsLine ? currentLine() : BLANK_LINE),
+            bandChangeTick: bandTickSeen.current,
+            context: lineContextRef.current ?? lineContextNow(),
+            bandCleared: aside,
+            restored: keepsLine ? restoredContext ?? undefined : undefined,
           }
         : null,
     )
   })
 
-  const reset = () => {
+  // `focus` false: no caret move to Call (a band change sets the line aside while the operator is at
+  // the band control).
+  const reset = (focus = true) => {
     // Before the call goes: a contact abandoned here gives its call-history values back. A
     // logged one has already said it keeps them (`endFill(true)` beside its `reset()`).
     endFill(false)
     setRemoteDraftContext(null)
+    setRestoredContext(null)
     setLogCall('')
     setLogRstSent(null)
     setLogRstRcvd(null)
@@ -1846,6 +2041,9 @@ export function LogEntry({
     setLogImage(null)
     setPark('')
     setWorkPark(null)
+    // A Use pressed on the IOTA offer was for this contact, logged or let go of (Clear, a band
+    // change setting the line aside): the next one, even the same call, starts with nothing taken.
+    iotaOffer.reset()
     if (!remoteMode) void setCwPeerInfo('', '', '') // clear the {HISNAME}/{HISSTATE} tokens for the next contact
     // The entry line ended WITHOUT logging (the clear button, or moving on). The serial that
     // station copied stays bound to them — come back later and they get the same one — but the
@@ -1869,7 +2067,7 @@ export function LogEntry({
     // input (FD or standard) holds the ref, so this always hits the visible field.
     // preventScroll for the same reason as the click-to-work RST focus above:
     // this focus readies the field, it must not snap the cockpit to the log.
-    requestAnimationFrame(() => callInputRef.current?.focus({ preventScroll: true }))
+    if (focus) requestAnimationFrame(() => callInputRef.current?.focus({ preventScroll: true }))
     onReset?.()
   }
 
@@ -1978,11 +2176,16 @@ export function LogEntry({
   const overrideBlocked = ovFreqBlocked || (overrideOpen && ovWhen === null)
   // Remote drafts survive navigation and other operators' QSYs. Keep their
   // captured contact context; the explicit other-radio override still wins.
-  const draftContext = remoteMode ? remoteDraftContext : null
-  // The frequency a contact logged now is on: the dial, plus the host's audio offset where it logs
-  // one (`logOffsetHz`), to the hertz.
-  const liveFreqMhz =
-    logOffsetHz == null ? snap.radio.dialMhz : Math.round(snap.radio.dialMhz * 1e6 + logOffsetHz) / 1e6
+  // …and a line a band change set aside and Restore put back logs on the band it was made on.
+  const draftContext = remoteMode
+    ? remoteDraftContext
+    : restoredContext && (!restoredContext.call.trim() || sameCall(restoredContext.call, logCall))
+      ? restoredContext
+      : null
+  /** The band, frequency and mode a contact typed now is made on (a Remote draft's, where it has one). */
+  function lineContextNow(): LineContext {
+    return remoteDraftContext ?? { band: snap.radio.band, freqMhz: liveFreqMhz, mode }
+  }
   const effBand = overrideOpen ? ovBand : draftContext?.band ?? snap.radio.band
   const effFreqMhz = overrideOpen ? ovFreqNum : draftContext?.freqMhz ?? liveFreqMhz
   const effMode = overrideOpen ? ovMode : draftContext?.mode ?? mode
@@ -2008,20 +2211,21 @@ export function LogEntry({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remote?.resetKey])
 
-  const logIt = async () => {
-    if (remote && (!remote.canSubmit || remote.busy || remote.pending || fdActive)) return
+  // True when the contact reached the log; every refusal, said or not, is false.
+  const logIt = async (): Promise<boolean> => {
+    if (remote && (!remote.canSubmit || remote.busy || remote.pending || fdActive)) return false
     const call = logCall.trim().toUpperCase()
-    if (!call) return
+    if (!call) return false
     if (overrideBlocked) {
       pushToast(
         ovFreqBlocked ? t('logEntry.override.blocked') : t('logEntry.override.timeBlocked', { date: UTC_DATE_FORMAT, ...UTC_TIME_FORMATS }),
         'error',
       )
-      return
+      return false
     }
     if (gridBlocked) {
       pushToast(t('logEntry.grid.blockedToast', { grid: logGrid.trim() }), 'error')
-      return
+      return false
     }
 
     if (fdActive) {
@@ -2029,7 +2233,7 @@ export function LogEntry({
       // is mandatory — never log
       // a blank as the literal '?' (it would inflate the section multiplier), so bail until the
       // exchange is complete and the section is a real ARRL/RAC code.
-      if (!fdExchangeOk || !sentRstGood) return
+      if (!fdExchangeOk || !sentRstGood) return false
       // ⭐ THE TRANSPORT IS THE FIELD VECTOR — `contest_log_manual(call, fields, …)`,
       // one pair per box the strip actually rendered, in the session's own receive
       // order. It replaced `fd_log_manual`'s two positional slots, which could carry
@@ -2123,9 +2327,11 @@ export function LogEntry({
             endFill(true)
             setFdFields((prev) => afterLogged(prev, fdReceives, loggedRow))
             reset()
+            loggedFromStrip(call, snap.radio.band)
+            return true
           }
         }
-        return
+        return false
       }
       // ⭐ THE SATELLITE EXCHANGE TAKES ITS BAND OFF THE PASS, NOT THE DIAL. The
       // ordinary command stamps the band the radio is on at the moment you type, which
@@ -2166,8 +2372,10 @@ export function LogEntry({
         endFill(true)
         setFdFields((prev) => afterLogged(prev, fdReceives, loggedRow))
         reset()
+        loggedFromStrip(call, snap.radio.band)
+        return true
       }
-      return
+      return false
     }
 
     // Standard logbook path.
@@ -2231,21 +2439,72 @@ export function LogEntry({
           : undefined,
     }
     if (remote) {
-      try { await remote.submit(rec, overrideOpen ? 'explicit' : 'station'); reset() }
+      try { await remote.submit(rec, overrideOpen ? 'explicit' : 'station'); reset(); loggedFromStrip(call, effBand); return true }
       catch { /* The adapter keeps a visible outcome and the draft. */ }
-      return
+      return false
     }
     // The draft lets go of the contact as its log starts (see the draft effect); one that fails is
     // still on screen, and kept again from the next render on.
     committing.current = true
     if (draft) writeLogDraft(draft, null)
-    const r = await withErrorToast(() => logQso(rec, stateSourceRef.current), t('logEntry.logFailed'))
+    const r = await withErrorToast(() => logQso(rec, stateSourceRef.current, iotaOffer.taken), t('logEntry.logFailed'))
     committing.current = false
     if (r) {
       pushToast(t('logEntry.logged', { call, mode: effMode }), 'success')
       reset()
+      loggedFromStrip(call, effBand)
+      return true
     }
+    return false
   }
+
+  // A host's "log it" (`logRequest`): this strip's own Log, for the station the request names and
+  // no other. Keyed on the request's id, so one press is one answer.
+  const logRequestRef = useRef(onLogRequest)
+  logRequestRef.current = onLogRequest
+  useEffect(() => {
+    if (!logRequest) return
+    const report = logRequestRef.current ?? (() => {})
+    const want = logRequest.call.trim().toUpperCase()
+    const held = logCall.trim().toUpperCase()
+    if (want && !held) {
+      // Filled for the operator to check: a sure call, looked up as a click-to-work is.
+      setLogCall(want)
+      humanCallEditRef.current = false
+      settledCallRef.current = true
+      report(logRequest.id, { kind: 'filled' })
+      return
+    }
+    if (want && held !== want) {
+      report(logRequest.id, { kind: 'other-call', held })
+      return
+    }
+    // What disables this strip's Log button refuses the request too.
+    const ready = fdActive
+      ? held !== '' && fdExchangeOk && sentRstGood
+      : held !== '' && !overrideBlocked && !gridBlocked && !(remote != null && (!remote.canSubmit || remote.busy || remote.pending))
+    if (!ready) {
+      report(logRequest.id, { kind: 'not-ready' })
+      return
+    }
+    const { id, claim } = logRequest
+    void claim()
+      .catch(() => false)
+      .then((mine) => {
+        if (!mine) {
+          report(id, { kind: 'taken' })
+          return
+        }
+        report(id, { kind: 'logging' })
+        // Claimed, but the log can still refuse it: said, so the host gives the claim back.
+        void logIt()
+          .catch(() => false)
+          .then((landed) => {
+            if (!landed) report(id, { kind: 'refused' })
+          })
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logRequest?.id])
 
   const onEnter = (e: React.KeyboardEvent) => {
     if (e.key !== 'Enter') return
@@ -2690,6 +2949,25 @@ export function LogEntry({
     if (decision.log) await logIt()
     esmCaret(decision.caret)
   }
+  // The band change's notice (`bandCleared`), in both layouts.
+  const bandClearedNotice = bandCleared && (
+    <p className="le-contest-resume le-band-cleared" role="status">
+      {bandCleared.line.call.trim()
+        ? t('logEntry.bandCleared', {
+            call: bandCleared.line.call.trim().toUpperCase(),
+            band: bandCleared.context.band || snap.radio.band,
+          })
+        : t('logEntry.bandCleared.noCall', { band: bandCleared.context.band || snap.radio.band })}{' '}
+      {restoreBlocked && <>{t('logEntry.bandCleared.contestBand', { band: bandCleared.context.band })} </>}
+      <button type="button" className="export-btn" onClick={restoreBandCleared} disabled={restoreBlocked}>
+        {t('logEntry.bandCleared.restore')}
+      </button>{' '}
+      <button type="button" className="export-btn" onClick={() => setBandCleared(null)}>
+        {t('common.dismiss')}
+      </button>
+    </p>
+  )
+
   if (fdActive) {
     return (
       <div className="log-entry log-entry-fd">
@@ -3036,7 +3314,7 @@ export function LogEntry({
           <button
             type="button"
             className="le-qrz"
-            onClick={reset}
+            onClick={() => reset()}
             title={t('logEntry.clear.title')}
           >
             {t('logEntry.clear.label')}
@@ -3102,6 +3380,7 @@ export function LogEntry({
             changes height, and the one this shipped with (8.5em = 119px against a 117px natural
             strip) reserved two pixels of an eleven-pixel line — i.e. nothing. The wrapper is
             zero-height in every other host, so Phone and CW are unchanged. */}
+        {bandClearedNotice}
         <div className="le-fd-verdicts">
         {removeLine != null && (
           <div className="le-fd-hint le-fd-remove-line" role={removeArmed || removeNote?.alert ? 'alert' : 'status'}>
@@ -3207,6 +3486,7 @@ export function LogEntry({
           </button>
         </p>
       )}
+      {bandClearedNotice}
       {remoteMode && remoteWorkOffer && <div>
         <p role="status">{t('remote.workDraftKept', { call: remoteWorkOffer.call })}</p>
         <div className="remote-actions"><button type="button" className="remote-button" disabled={remote?.pending}
@@ -3241,6 +3521,8 @@ export function LogEntry({
           </button>
         </div>
       )}
+
+      <IotaOfferChip state={iotaOffer} />
 
       <div className="le-row">
         <input
@@ -3353,7 +3635,7 @@ export function LogEntry({
           placeholder={t('logEntry.name.placeholder')}
           autoComplete="off"
         />
-        <button type="button" className="le-qrz" onClick={reset} title={t('logEntry.clear.title')}>
+        <button type="button" className="le-qrz" onClick={() => reset()} title={t('logEntry.clear.title')}>
           {t('logEntry.clear.label')}
         </button>
       </div>
@@ -3389,14 +3671,6 @@ export function LogEntry({
           placeholder={t('logEntry.country.placeholder')}
           autoComplete="off"
           title={t('logEntry.country.title')}
-        />
-        <input
-          className="settings-input le-comment"
-          value={logComment}
-          onChange={(e) => setLogComment(e.target.value)}
-          onKeyDown={onEnter}
-          placeholder={t('logEntry.comment.placeholder')}
-          autoComplete="off"
         />
       </div>
 
@@ -3514,6 +3788,25 @@ export function LogEntry({
           })}
         </div>
       )}
+
+      {/* THE SHARED COMMENT: its own full-width box, always directly above Notes. It was the
+          fourth field of the QTH row, where a wrapped line squeezed it to a few words (operator,
+          1.21.0). It wraps over several lines but holds ONE: ADIF's COMMENT is a String and
+          NOTES the multi-line field, so a pasted line break lands as a space, and Enter logs
+          the contact, as it always did from this box. */}
+      <textarea
+        className="settings-input le-comment"
+        value={logComment}
+        onChange={(e) => setLogComment(oneLineTyped(e.target))}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.preventDefault()
+          onEnter(e)
+        }}
+        placeholder={t('logEntry.comment.placeholder')}
+        rows={2}
+        autoComplete="off"
+        spellCheck
+      />
 
       <textarea
         className="settings-input le-notes"

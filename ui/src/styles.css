@@ -655,11 +655,33 @@ button.nb-chip:hover {
   border-color: var(--accent);
 }
 
+/* THE LANE NEVER MAKES THE TOP BAR TALLER. The bar is one flex-wrap row, and a wrapping row
+   places each item on a line by its max-content width, so a lane sized by its text pushed the
+   last group (FT's Auto / Tx 1st / Tx 2nd) onto a second line, and the whole screen moved down
+   a row while a message was up. So the lane takes no width of its own (`width: 0`, which is also
+   its contribution to the TX/RX group's width, the margin cancelling the group's gap before it),
+   grows into the room left on the line that group is on, and its chips shorten to an ellipsis;
+   the full text is the chip's tooltip, as it always was. The group grows only while a lane is up
+   (`:has`), so nothing moves without one.
+   ⛔ ONE EXCEPTION, AND IT IS SAFETY: the first chip's flag is never cut. A critical lane ("PTT
+   OFF FAILED — TX STOPPED") must be on screen, so the lane keeps at least its flag (the 13 px
+   icon, the chip's padding and border, and the gap the margin cancels); on a line with less room
+   than that the bar takes a line rather than hide the alarm. */
 .status-lane {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  flex-wrap: wrap;
+  flex: 1 1 0;
+  width: 0;
+  min-width: calc(10px + 13px + 2 * var(--space-2) + 2px);
+  margin-inline-start: -10px;
+  overflow: hidden;
+}
+.status-lane > :first-child {
+  margin-inline-start: 10px;
+}
+.txrx:has(> .status-lane) {
+  flex-grow: 1;
 }
 .status-chip {
   display: inline-flex;
@@ -672,9 +694,16 @@ button.nb-chip:hover {
   white-space: nowrap;
   border: 1px solid var(--border);
   cursor: default;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.status-chip-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .status-chip svg {
   display: block;
+  flex: 0 0 auto;
 }
 .status-chip.tier-critical {
   color: var(--alert-critical);
@@ -6111,9 +6140,17 @@ h2 {
   padding: var(--gap);
 }
 
-/* Three-pane workspace (chat/qso/fieldDay/band): waterfall on the right rail. Fluid
+/* Three-pane workspace (Tempo): a full-width waterfall strip, then three columns. Fluid
    side columns driven by CSS vars (drag-resizable via the splitters). The single-panel
-   views (.layout.single) are NOT data-three-pane and are unaffected. */
+   views (.layout.single) are NOT data-three-pane and are unaffected.
+   THE WATERFALL STRIP (2026-10-26, "width and height to be consistent"): every mode's waterfall
+   starts at the same full width and 25 % of its shell, so Tempo's is a row of this grid (`wf`)
+   across all five tracks, sized by its divider (App `--tempo-wf-h`, written on this element,
+   stored per surface as `nexus.split.tempo.waterfall`) between the yielding floor and the
+   ceiling every waterfall strip has (features/paneSeam WATERFALL_SPLIT_MIN/MAX, the JS8/RTTY
+   rule's own numbers). A track, not the item's height: a percentage resolves against this grid's
+   content height, as a shell child's basis does against its shell. The right rail (`waterfall`,
+   the area's old name) now holds Band Activity and the link pill. */
 .layout[data-three-pane] {
   grid-template-columns:
     minmax(var(--rail-min, 200px), var(--left-rail-w))
@@ -6121,16 +6158,43 @@ h2 {
     minmax(0, 1fr)
     auto
     var(--right-rail-w);
-  grid-template-areas: 'stations split-left center split waterfall';
+  grid-template-rows:
+    clamp(min(8em, calc(0.28 * var(--vh-eff, 100vh))), var(--tempo-wf-h, 25%), calc(0.45 * var(--vh-eff, 100vh)))
+    minmax(0, 1fr);
+  grid-template-areas:
+    'wf wf wf wf wf'
+    'stations split-left center split waterfall';
 }
 /* Tempo cockpit: a full-width shared header row above the three panes (chat
    view only — other three-pane views pass no header and are unaffected), so
    Tempo's header spans the whole workspace like the single-pane cockpits. */
 .layout[data-three-pane].has-tempo-header {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows:
+    auto
+    clamp(min(8em, calc(0.28 * var(--vh-eff, 100vh))), var(--tempo-wf-h, 25%), calc(0.45 * var(--vh-eff, 100vh)))
+    minmax(0, 1fr);
   grid-template-areas:
     'header header header header header'
+    'wf wf wf wf wf'
     'stations split-left center split waterfall';
+}
+/* The strip: the Waterfall's own root, a direct grid item, drawn as a panel like the cells beside it. */
+.layout[data-three-pane] > .waterfall-wrap {
+  grid-area: wf;
+  min-width: 0;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+/* Its divider stands in the strip's own cell, on its bottom edge, and hangs into the row gap below:
+   it takes no track of its own (a row of its own would cost the grid a second gap), and it is
+   centred in the gap, over no pane. */
+.pane-splitter.horizontal.tempo-wf-seam {
+  grid-area: wf;
+  align-self: end;
+  margin: 0 0 calc(-0.5 * var(--gap) - var(--space-1));
 }
 .grid-header {
   grid-area: header;
@@ -6235,11 +6299,20 @@ body.resizing {
   max-width: 1100px;
   margin: 0 auto;
 }
-/* xl (effective width ≥ 2400): let the DATA surface — Logbook's 11-column table — use
-   the room. POTA is prose-shaped and keeps the 1100px measure above; Settings and
-   Repeaters USED to, and the rules below are why they no longer do. */
+/* THE LOGBOOK USES THE WHOLE WINDOW from md, as Settings, Repeaters and the Field Day board do.
+   (The operator, 2026-10-27: "a large portion of the screen on either side is unused, and must
+   one scroll horizontally.") It was capped at the 1100px measure above, and at 1600px on xl only,
+   so the table sat in a centred column: 935px of a 1024×768 window (md at its 85 % zoom), 1100px
+   of 1920 (lg), 1600px of 2560 (xl), while a table with added columns scrolled sideways inside
+   that column. The table is the content here, and width buys it columns, not longer lines. Where
+   the columns still do not fit, `.log-scroll` scrolls them sideways (`.logbook-table.wide`), never
+   the page. md AND UP for Settings' reason: at xs/sm the cap is inert by arithmetic, so the floor
+   is untouched. Computed per tier in settings-width.test.tsx; measured in real Chrome by
+   `scripts/browser-probe --desktop logbook`. POTA is prose-shaped and keeps the measure. */
+[data-viewport='md'] .layout.single > .panel.log-view,
+[data-viewport='lg'] .layout.single > .panel.log-view,
 [data-viewport='xl'] .layout.single > .panel.log-view {
-  max-width: 1600px;
+  max-width: none;
 }
 /* Repeaters uses the whole width of its pane from md, as Settings does (the operator,
    2026-10-03: "the screen is narrow and in the middle and you have a lot of room on the screen
@@ -7253,6 +7326,28 @@ select optgroup {
   background: color-mix(in srgb, var(--rx) 18%, transparent);
   border-color: color-mix(in srgb, var(--rx) 45%, transparent);
   color: var(--state-good);
+    }
+
+/* ATU ON (#344): the radio reports its tuner in line. Lit like Hold Tx's latch, from variables
+   both themes define. The menu that switches it out is anchored on an empty span inside the
+   button (AtuSwitchOutMenu.tsx); it takes no room. */
+.op-btn.atu.on {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-elev));
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+/* The anchor sits on the button's bottom-left corner, so the menu opens below (or, without room, above)
+   the strip's row and never over Stop TX beside it (measured by `scripts/browser-probe --desktop atu`). */
+.op-btn.atu {
+  position: relative;
+}
+.atu-menu-anchor {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
 }
 .op-btn.tune.keyed {
   background: var(--state-ok);
@@ -7898,6 +7993,7 @@ select optgroup {
   --need-mode: #22d3ee; /* cyan — new mode */
   --need-grid: #34d399; /* green — new grid */
   --need-state: #2dd4bf; /* teal — new US state (WAS) */
+  --need-iota: #fb7185; /* coral — new IOTA island group */
   --need-confirm: #9ca3af; /* grey — worked, needs a confirmation */
   --need-dxped: #38bdf8; /* sky — active DXpedition */
   --need-pota: #4ade80; /* green — live POTA activator */
@@ -7938,6 +8034,7 @@ select optgroup {
   --need-mode: #0d6f8a;
   --need-grid: #047857;
   --need-state: #0f766e; /* teal — new US state (WAS) */
+  --need-iota: #be123c; /* coral — new IOTA island group */
   --need-confirm: #64748b;
   --need-dxped: #0369a1;
   /* Two steps darker than the #15803d it was. The first (operator, 2026-10-05: "Add a brightness difference
@@ -8015,6 +8112,9 @@ select optgroup {
 }
 .need-state {
   --need-color: var(--need-state);
+}
+.need-iota {
+  --need-color: var(--need-iota);
 }
 .need-watch {
   --need-color: var(--need-watch);
@@ -8688,7 +8788,9 @@ select optgroup {
   text-transform: uppercase;
   color: var(--text-faint);
 }
-.logconfirm-grid input {
+/* The propagation-mode picker sits in the grid beside the boxes, and looks like one. */
+.logconfirm-grid input,
+.logconfirm-grid select {
   padding: var(--space-2) 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -8696,11 +8798,12 @@ select optgroup {
   color: var(--text);
   font-size: calc(14px * var(--text-scale));
 }
-.logconfirm-grid input:focus {
+.logconfirm-grid input:focus,
+.logconfirm-grid select:focus {
   outline: none;
   border-color: var(--accent);
 }
-/* The comment is free text, so it takes the whole row under the four short fields. */
+/* The comment is free text, so it takes the whole row under the short fields. */
 .logconfirm-grid .logconfirm-comment {
   grid-column: 1 / -1;
 }
@@ -8824,6 +8927,28 @@ select optgroup {
   font-size: calc(11px * var(--text-scale));
   color: var(--state-good);
   border: 1px solid color-mix(in srgb, var(--state-good) 40%, transparent);
+}
+/* "Cards to send" (QslCardsToSend) renders on the park-states box, rows and notes above; its label
+   stock, start label and combine choice sit in one wrapping row above the list. */
+.qsl-cards-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+  font-size: calc(13px * var(--text-scale));
+}
+.qsl-cards-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.qsl-cards-options .park-review-note {
+  flex-basis: 100%;
+  margin: 0;
+}
+.qsl-cards-start {
+  width: 6ch;
 }
 /* "Check confirmations" (ConfirmationReview) renders on the park-states box, rows and notes above.
    Each row adds a second line, under the call: why it is listed, and what the change keeps or
@@ -10771,6 +10896,8 @@ input.cw-pitch::-webkit-inner-spin-button {
 [data-pane='log'] > .pane-body {
   scroll-padding-bottom: 6em;
 }
+/* The shared comment sits on its own line above Notes and is drawn like it (LogEntry.tsx). */
+.le-comment,
 .le-notes {
   width: 100%;
   resize: vertical;
@@ -10780,6 +10907,10 @@ input.cw-pitch::-webkit-inner-spin-button {
   padding: 6px var(--space-3);
   line-height: 1.4;
   font-family: inherit;
+}
+.le-comment {
+  display: block;
+  margin-bottom: var(--space-2);
 }
 .le-hint {
   display: block;
@@ -11548,6 +11679,14 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
   max-height: var(--radix-dropdown-menu-content-available-height);
   overflow-y: auto;
 }
+/* What "(custom)" means, above the channels. Wraps: the menu is as wide as its channel rows. */
+.band-menu-note {
+  max-width: 32ch;
+  padding: var(--space-1) var(--space-2);
+  font-size: calc(11px * var(--text-scale));
+  color: var(--text-faint);
+  white-space: normal;
+}
 .band-menu-group {
   padding: var(--space-1) var(--space-2) 0;
   font-size: var(--fs-label);
@@ -12101,6 +12240,58 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
   gap: 1px var(--space-2);
   padding: 0;
 }
+/* The COMP row in Phone SETS the processor level as well as metering compression: the fill is
+   the meter, the marker line is the level, and the track is the slider (drag / arrow keys).
+   `touch-action: none` keeps a finger drag on a touch screen from scrolling the dock instead. */
+.ph-txmeter-track {
+  position: relative;
+}
+/* A COMP row carrying its controls takes two tracks of the grid, so its bar keeps the room a
+   meter row has beside the chips. Only Phone passes the controls, and Phone's dock is always
+   many tracks wide. */
+.ph-txmeter.has-ctl {
+  grid-column: span 2;
+}
+.ph-txmeter.settable .ph-txmeter-track {
+  cursor: ew-resize;
+  touch-action: none;
+}
+.ph-txmeter.settable .ph-txmeter-track:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.ph-txmeter-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text);
+  pointer-events: none;
+}
+/* The processor switch and the transmit-bandwidth step, beside COMP: small, fixed-height chips
+   on the row's own line, so a row with them is no taller than one without. */
+.ph-txmeter-btn {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: calc(10px * var(--text-scale));
+  line-height: 1.2;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ph-txmeter-btn.on {
+  color: var(--text);
+  border-color: var(--state-good);
+}
+.ph-txmeter-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 /* Between overs: keep the last readings visible but clearly not live. */
 .ph-txmeters.idle .ph-txmeter-fill {
   opacity: 0.35;
@@ -12108,6 +12299,12 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
 .ph-txmeters.idle .ph-txmeter-value,
 .ph-txmeters.idle .ph-txmeter-label {
   opacity: 0.55;
+}
+/* …except a temperature, which is read while receiving and is live between overs. */
+.ph-txmeters.idle .ph-txmeter.temp .ph-txmeter-fill,
+.ph-txmeters.idle .ph-txmeter.temp .ph-txmeter-value,
+.ph-txmeters.idle .ph-txmeter.temp .ph-txmeter-label {
+  opacity: 1;
 }
 .ph-txmeters-hint {
   font-size: calc(10px * var(--text-scale));
@@ -12432,6 +12629,13 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
   font-size: var(--fs-micro);
   color: var(--accent);
   line-height: 1.4;
+}
+.vk-flex-dax-note {
+  margin: 0 0 10px;
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .vk-fd-hint strong {
   font-family: var(--font-mono);
@@ -14715,6 +14919,24 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
   color: var(--accent);
   padding: 0 6px;
 }
+/* A section folded to its heading by the experience answer (SettingsPanel `fold`): the legend
+   stays as the label, everything else is out of the way until Show all, a search pick or a deep
+   link opens it. Only for the two "new" answers; no answer folds nothing. */
+.settings-section[data-folded] {
+  padding-bottom: 0;
+}
+.settings-section[data-folded] > :not(legend) {
+  display: none;
+}
+/* The line above a folded tab's sections, with its Show all. */
+.settings-fold-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: calc(12px * var(--text-scale));
+}
 /* A disabling group INSIDE a `.settings-section`, with no box of its own. It exists because
    `disabled` is the only way to switch off a set of controls at once, and HTML gives that to
    `<fieldset>` alone — but a control inside a disabled fieldset is disabled whatever its own
@@ -15367,6 +15589,30 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
 .routing-default {
   margin-left: auto;
   gap: var(--space-2);
+}
+/* The routing in plain words: on each radio card, and one line per radio above the rules. */
+.radio-card-routes {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+.routing-plain {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.routing-plain li {
+  overflow-wrap: anywhere;
+}
+.routing-policy {
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.routing-policy .settings-input {
+  width: auto;
 }
 .routing-test {
   border-top: 1px solid var(--border);
@@ -17019,10 +17265,8 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
 }
 [data-viewport='xs'] .layout[data-three-pane] {
   /* Narrowest desktop class: tighten further and lower the rail floor so the
-     center pane keeps usable width. The waterfall stays in its rail and is never
-     hidden — the rail only narrows. (There is no top-strip alternative: the
-     `data-layout` attribute an older comment here promised had no writer and no
-     CSS, and was deleted with the rest of that dead vocabulary.) */
+     center pane keeps usable width. The rail only narrows. (The waterfall has been a
+     full-width strip above the columns since 2026-10-26, not in this rail.) */
   --left-rail-w: 210px;
   --rail-min: 168px;
   --right-rail-w: clamp(240px, calc(0.32 * var(--vw-eff, 100vw)), 360px);
@@ -17134,11 +17378,22 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
 [data-viewport='sm'] .grid-stations,
 [data-viewport='sm'] .grid-center,
 [data-viewport='sm'] .grid-waterfall,
+[data-viewport='sm'] .layout[data-three-pane] > .waterfall-wrap,
+[data-viewport='sm'] .pane-splitter.horizontal.tempo-wf-seam,
 [data-viewport='xs'] .grid-header,
 [data-viewport='xs'] .grid-stations,
 [data-viewport='xs'] .grid-center,
-[data-viewport='xs'] .grid-waterfall {
+[data-viewport='xs'] .grid-waterfall,
+[data-viewport='xs'] .layout[data-three-pane] > .waterfall-wrap,
+[data-viewport='xs'] .pane-splitter.horizontal.tempo-wf-seam {
   grid-area: auto;
+}
+/* Tempo's waterfall strip (2026-10-26) stacks under the header at the house default share of the
+   window: in the collapse its row is content-height, so the strip carries the height itself (its
+   divider is hidden here, as every divider is). */
+[data-viewport='sm'] .layout[data-three-pane] > .waterfall-wrap,
+[data-viewport='xs'] .layout[data-three-pane] > .waterfall-wrap {
+  height: max(min(8em, calc(0.28 * var(--vh-eff, 100vh))), calc(0.25 * var(--vh-eff, 100vh)));
 }
 [data-viewport='sm'] .grid-stations,
 [data-viewport='sm'] .grid-center,
@@ -17376,6 +17631,10 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
   border-left: 3px solid var(--need-state);
   background: color-mix(in srgb, var(--need-state) 16%, transparent);
 }
+.decode-row.need-iota {
+  border-left: 3px solid var(--need-iota);
+  background: color-mix(in srgb, var(--need-iota) 18%, transparent);
+}
 .decode-row.need-confirm {
   border-left: 3px solid var(--need-confirm);
   background: color-mix(in srgb, var(--need-confirm) 14%, transparent);
@@ -17399,6 +17658,7 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
 .decode-row.need-mode .need-chip.need-mode,
 .decode-row.need-grid .need-chip.need-grid,
 .decode-row.need-state .need-chip.need-state,
+.decode-row.need-iota .need-chip.need-iota,
 .decode-row.need-confirm .need-chip.need-confirm,
 .decode-row.need-pota .need-chip.need-pota {
   background: transparent;
@@ -17733,6 +17993,13 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
 }
 .logbook-field-call .settings-input {
   flex: 1 1 120px;
+}
+/* The shared comment (above Notes) is drawn like it, a line shorter. */
+.logbook-comment {
+  resize: vertical;
+  min-height: 40px;
+  font-family: inherit;
+  line-height: 1.4;
 }
 .logbook-notes {
   resize: vertical;
@@ -18087,6 +18354,19 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
 .log-col-resize:hover {
   background: color-mix(in srgb, var(--accent) 45%, transparent);
 }
+/* A header being dragged to another place (Logbook.tsx, MOVING A COLUMN): the one carried dims, and
+   the header it would land beside shows an accent bar on that side. Drawn inside the cell (an inset
+   shadow), so a move in progress takes no width and shifts nothing. */
+.logbook-row.head > .log-cell.moving {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+.logbook-row.head > .log-cell.drop-before {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.logbook-row.head > .log-cell.drop-after {
+  box-shadow: inset -3px 0 0 var(--accent);
+}
 /* An upload column's mark: the state in a glyph, its words in the tooltip. */
 .log-upload.done {
   color: var(--state-good);
@@ -18266,6 +18546,15 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
   font-size: calc(13px * var(--text-scale));
   color: var(--text-dim);
   margin: 0 0 18px;
+}
+/* The first-contact walk-through's four lines (FirstContactWalk.tsx). */
+.first-contact-steps {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+  display: grid;
+  gap: var(--space-2);
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.5;
 }
 .wizard-goals {
   display: grid;
@@ -18830,7 +19119,12 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
 }
 /* The elastic member: fills the middle when wide, and (since both base clusters are flex:0 0 auto
    under flex-wrap) drops to its own row first when space is tight — so the mode-specific controls
-   stay in a consistent location and the base row never reflows out from under the operator. */
+   stay in a consistent location and the base row never reflows out from under the operator. It
+   carries the header's actions (`.ch-actions`) at the end of its own row, so they share its last
+   line instead of taking a line of their own; it is therefore never empty, and a passed child that
+   renders nothing (the rotor strip with no rotator: the RTTY, PSK and JS8 headers' only child)
+   leaves it holding just the actions, the header item they were before (guarded by
+   CockpitHeader.emptyExtras.test.tsx). */
 .ch-mode-extras {
   flex: 1 1 auto;
   min-width: 0;
@@ -18838,13 +19132,6 @@ button.recall-avatar:focus-visible .recall-avatar-qrz {
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
-}
-/* A passed child can render nothing: the rotor strip on a station with no rotator, which is the
-   RTTY, PSK and JS8 headers' only child. Empty, the region would still cost the header's line a
-   gap (and the Remote Quick header a grid row), so it leaves layout until something is in it.
-   Guarded by CockpitHeader.emptyExtras.test.tsx. */
-.ch-mode-extras:empty {
-  display: none;
 }
 /* The band control + Tune as one unit: it wraps as a whole, so Tune stays beside the band
    control on whichever line the pair lands (#287, measured at 1024x768 110-125%). */
@@ -19696,10 +19983,11 @@ body.pane-dragging {
    real estate goes to the decode lists + roster below. */
 .cockpit-waterfall {
   /* Height is operator-resizable (the PaneSeam under it drives --cockpit-wf-h and
-     clamps 88–420 px, and to what this rule honours); 22% stays the untouched default. `flex-shrink:1` + no px
+     clamps 88–420 px, and to what this rule honours). The untouched default is 25 % of the SHELL,
+     painted here as the body's share (OperateCockpit `defaultOf`); 25% is only the pre-paint fallback. `flex-shrink:1` + no px
      floor + a max lets it YIELD on short windows instead of starving the lists
      below — the fit-scale keeps it a comfortable size at normal sizes. */
-  flex: 0 1 var(--cockpit-wf-h, 22%);
+  flex: 0 1 var(--cockpit-wf-h, 25%);
   min-height: 0;
   max-height: 60%;
   display: flex;
@@ -20053,6 +20341,11 @@ button.cq-skiptx1.on {
    button's own font — sized to 'TX Off' plus the padding. */
 .cq-txctl .op-btn.monitor {
   min-width: 6.2em;
+}
+/* …and ATU flips ATU ↔ ATU ON with the radio's tuner (#344): a floor sized to 'ATU ON' plus the
+   padding (93 px at 1920×1080, measured), so Stop TX does not move when the tuner goes in or out. */
+.cq-txctl .op-btn.atu {
+  min-width: 7em;
 }
 /* The latch's READ-ONLY twin (Phone, CW): the same box, nothing to press. */
 .cq-txctl .op-btn.readonly {
@@ -20628,6 +20921,27 @@ button.cq-skiptx1.on {
   flex: 1;
   min-height: 0;
 }
+/* THE SPOTS BOARD IN A SHORT WINDOW. Its filter bar has a chip per spotted-from country, so on a
+   busy day it can be taller than a small window: measured in Chrome at the Spots window's 490×360
+   minimum with 80 countries, the list was squeezed to 2 px and the last chips were clipped below the
+   window. So the list keeps a floor of a few rows (the header and three, 119 px at 100%; the floor
+   is a little under that so it never asks for more height than the window's declared natural), and
+   once the list is at its floor the FILTER BAR gives way, scrolling inside itself. Not the whole
+   board: a scrollbar on the board takes its width from the columns, and in Chrome it then stayed up
+   (the chips rewrapped taller under it) and pushed the columns 6 px sideways. The filter bar's own
+   scrollbar takes width only from the chips, and its gutter is kept whether it scrolls or not, so the
+   chips wrap the same way either side of the threshold (without it the scrollbar stayed up after the
+   window grew back, for the same reason). While everything fits, nothing scrolls but the list.
+   (DetachedPanel.scroll.test.tsx computes the winners; `browser-probe --desktop spots` lays it out.) */
+.spots-panel > .np-filters {
+  flex: 0 1 auto;
+  min-height: 3em;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.spots-panel > .sp-grid {
+  min-height: 8em;
+}
 /* A `.panel`-rooted view torn off on its own: the panel IS the window, so it takes the height
    and owns its own deficit — the SAME fate `.layout.single > .panel` gives it docked, in the
    host that has no `.layout.single` to give it. Without this the only overflow declaration
@@ -20967,9 +21281,13 @@ button.cq-skiptx1.on {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
 /* Spots panel — the raw firehose table (9 cols: age · call · entity · state · band · freq ·
-   mode · spotter · comment). Reuses the Needed board's row chrome, own column template. */
+   mode · spotter · comment, then the row's Spot button). Reuses the Needed board's row chrome,
+   own column template. The column floors are what the Spots window promises to fit at its
+   smallest (useScale's PANEL_NATURAL.spots, 740 px wide): the Spot button's column and its gap
+   (42 px) are paid for out of the spotter and comment floors, the two columns that ellipsize,
+   so a window dragged to its minimum neither scrolls sideways nor cuts the last column off. */
 .sp-grid .np-row {
-  grid-template-columns: 52px minmax(72px, 1fr) minmax(88px, 1.3fr) 34px 50px 70px 64px minmax(70px, 1fr) minmax(110px, 1.6fr) 32px;
+  grid-template-columns: 52px minmax(72px, 1fr) minmax(88px, 1.3fr) 34px 50px 70px 64px minmax(48px, 1fr) minmax(86px, 1.6fr) 32px;
 }
 /* ── THE TWO BOARDS AS PHONE AND CW PANES (#345) ──────────────────────────────────────────
    The Spots and Needed boards render inside a CockpitPaneFrame on the Phone and CW cockpits, as
@@ -21235,6 +21553,24 @@ button.cq-skiptx1.on {
 .sp-row.contest-dupe .qrz-link-call {
   text-decoration: line-through;
 }
+/* The IOTA island group a spot's comment names: plain while it is no need, the need's chip while it is
+   one (`need-chip need-iota`, whose ink and tint NeedChip.contrast.test.tsx holds). */
+.sp-iota {
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: calc(9px * var(--text-scale));
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.sp-iota.need-chip {
+  font-size: calc(9px * var(--text-scale));
+  padding: 1px 6px;
+  border: 1px solid var(--need-color);
+}
 .sp-worked {
   margin-right: 6px;
   padding: 1px 6px;
@@ -21328,6 +21664,9 @@ button.cq-skiptx1.on {
 }
 .np-row.need-zone {
   box-shadow: inset 3px 0 0 var(--need-zone);
+}
+.np-row.need-iota {
+  box-shadow: inset 3px 0 0 var(--need-iota);
 }
 .np-row.need-band {
   box-shadow: inset 3px 0 0 var(--need-band);
@@ -22052,6 +22391,8 @@ button.cq-skiptx1.on {
   display: flex;
   gap: 6px;
   flex: none;
+  /* The containing block of the Log button's waiting count (.cq-log-waiting). */
+  position: relative;
 }
 .cq-free input {
   /* Capped, never a grower: the free-text payload maxes at 13 chars (maxLength),
@@ -22096,6 +22437,31 @@ button.cq-skiptx1.on {
 }
 .cq-log:disabled {
   opacity: 0.4;
+}
+/* How many contacts wait for Log QSO: a count on the Log button's top-right corner (Log is the
+   last item in .cq-free), absolutely placed so it takes no room in the strip and never moves or
+   wraps a control; it takes no clicks, so Log under its edge still gets them. The number is the
+   theme's own text on its own ground, the pair every theme and skin keeps readable (WCAG AA,
+   4.5:1, checked by the logwaiting browser probe), ringed in Log's green; the light theme's
+   ground on that green was 4.1:1. */
+.cq-log-waiting {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 var(--space-1);
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid var(--state-good, #29c281);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 /* --- Band Activity / Rx Frequency (stock WSJT-X flow: chronological, bottom-
@@ -23856,6 +24222,15 @@ button.cq-skiptx1.on {
 .aw-needfilter:focus {
   outline: none;
   border-color: var(--accent);
+}
+/* The award status panel's two choosers and its three actions: a row that wraps. */
+.aw-status-controls,
+.aw-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin: var(--space-1) 0;
 }
 .aw-needsort {
   flex: none;
@@ -26304,7 +26679,7 @@ button.sat-chip:disabled {
      hideable) and the 45% zoom-corrected cap (raw vh is zoom-blind) keep a stale
      persisted % structurally harmless. The % basis resolves against the flex container.
      Guarded by cockpit-shells.test.ts (winning flex-grow must compute to 0). */
-  flex: 0 1 var(--cw-scope-h, 22%);
+  flex: 0 1 var(--cw-scope-h, 25%);
   height: auto;
   min-height: 8em;
   max-height: calc(0.45 * var(--vh-eff, 100vh));
@@ -26316,21 +26691,10 @@ button.sat-chip:disabled {
      the scope. That band is real estate the drag now actually controls — pull the seam
      down and the scope keeps it (as the sole grower this control did nothing at all:
      rendered height was basis-independent, measured identical at 12/30/52/90%). */
-  flex: 0 1 var(--ph-scope-h, 22%);
+  flex: 0 1 var(--ph-scope-h, 25%);
   height: auto;
   min-height: 8em;
   max-height: calc(0.45 * var(--vh-eff, 100vh));
-}
-/* BESIDE THE LEFT SIDE (2026-10-03) the scope stands in the stage (cockpit-panes.css), and the row
-   that holds the stage takes the stage's INTRINSIC height as its automatic minimum — where a column
-   counts each child at its preferred size, the scope at its content height rather than the 8em floor it
-   shrinks to under deficit. On a 1280×720 effective window that scrolled the shell 22 px further and
-   set the TX strip 22 px lower than without the side (measured in Chrome). Size containment makes the
-   scope's intrinsic size its floor, which is all the flex layout gives it under deficit anyway; laid
-   out, its size is still its basis clamped by the rule above. Only beside the side: with no side its
-   basis resolves against the shell, and nothing here changes. cockpit-shells.test.ts computes both. */
-.phone-cockpit .ph-scope-panel--beside {
-  contain: size;
 }
 /* Horizontal (height-dragging) splitter variant of the workspace .pane-splitter. It never
    shrinks: as a default flex item it gave its own 8 px to an overfull column (thinning to
@@ -26363,8 +26727,6 @@ button.sat-chip:disabled {
    (`.cockpit-col`, 12 px in cockpit-panes.css, which this sheet may not name: the dividers inside
    a column carry `in-column` instead), and Operate's body, side rail and Rx Frequency column (8 px),
    and FT's arranged columns (`.op-stack`, 8 px, in cockpit-panes.css: their dividers carry `in-op-stack`).
-   Phone's scope divider carries `in-column` too since its left side (2026-10-03): it stands in the
-   stage (cockpit-panes.css), whose gap is the shell's, so a shell-child selector cannot reach it.
    Exact at the spacing scale the dividers render at: `--space-scale` drops below 1 only at the
    sm/xs viewports, which hide every divider. cockpit-shells.test.ts computes each net. */
 .layout.single.rtty-cockpit > .pane-splitter.horizontal,
@@ -26372,6 +26734,7 @@ button.sat-chip:disabled {
 .layout.single.jtty-cockpit > .pane-splitter.horizontal,
 .layout.single.sstv-view > .pane-splitter.horizontal,
 .layout.single.cw-cockpit > .pane-splitter.horizontal,
+.layout.single.phone-cockpit > .pane-splitter.horizontal,
 .layout.single.js8-cockpit > .pane-splitter.horizontal,
 .pane-splitter.horizontal.in-column {
   margin-block: calc(-0.5 * var(--space-3) - var(--space-1));
@@ -28130,8 +28493,10 @@ button.sat-chip:disabled {
      min-height outranks every selector, which is how the previous spelling
      (`.rtty-cockpit > .pane-frame { min-height: 10em }`) shipped dead. Fenced:
      cockpit-panes.test.ts fails any other rule that sets this — inherited under a
-     region's tier-2/3 `overflow: hidden` it would be the clip mechanism reborn. */
-  --cockpit-fill-min: var(--rtty-fill-min, 10em);
+     region's tier-2/3 `overflow: hidden` it would be the clip mechanism reborn.
+     RTTY lowers it on a short cockpit through its knob (cockpit-panes.css `.rtty-cockpit`,
+     2026-10-27); PSK and SSTV never set the knob and keep the stock 10em. */
+  --cockpit-fill-min: var(--rtty-fill-floor, 10em);
 }
 /* JS8 is a REGION cockpit (CW's shape: a .cockpit-panes grid, not bare fill frames), so it
    takes CW's shell rule and NOT the --cockpit-fill-min knob — cockpit-panes.test.ts fences
@@ -28186,8 +28551,12 @@ button.sat-chip:disabled {
    basis is what renders (cockpit-shells.test.ts). The default, 25 % of the shell, is where the
    old fixed `0.22 × --vh-eff` measured (base tree, in Chrome): 25.1 % at 1024×768 and 1366×768,
    24.5 % at 1920×1080. The var is the SHELL's own (each shell carries its divider's), so the one
-   name serves all three cockpits. */
-.rtty-cockpit .waterfall-wrap,
+   name serves all three cockpits.
+
+   On RTTY the strip is the ROW `.rtty-wf-row` (2026-10-26): the waterfall, then the tuning scope right of
+   it (its size: cockpit-panes.css `.rtty-tuning-box`), so the waterfall keeps this height and the scope
+   its size, and the waterfall gives up the width. The divider sizes the row. */
+.rtty-wf-row,
 .psk-cockpit .waterfall-wrap,
 .jtty-cockpit .waterfall-wrap {
   flex: 0 1 var(--rtty-wf-h, 25%);
@@ -28199,11 +28568,25 @@ button.sat-chip:disabled {
      never more than 28% of the effective viewport where there is not. It is still a real
      floor: the canvas needs device pixels to draw into, and a strip that shrinks to nothing
      is a decoder with no display. Its divider's lower end is exactly this floor
-     (WATERFALL_SPLIT_MIN). */
-  min-height: min(var(--rtty-wf-floor, 8em), calc(0.28 * var(--vh-eff, 100vh)));
+     (WATERFALL_SPLIT_MIN). RTTY's strip may go to 6em on a short cockpit, below its divider's
+     lower end, only when the shell has no other room (cockpit-panes.css `--rtty-strip-floor`,
+     2026-10-27); PSK and JTTY never set it. */
+  min-height: min(var(--rtty-strip-floor, 8em), calc(0.28 * var(--vh-eff, 100vh)));
   /* The scope's ceiling (WATERFALL_SPLIT_MAX): a waterfall is a glance strip, and the
      transcript and the log strip below it are what this cockpit is for. */
   max-height: calc(0.45 * var(--vh-eff, 100vh));
+}
+/* RTTY's strip row: the waterfall takes the width the tuning scope leaves (a zero basis, so the scope's
+   own size is what stands) and the row's whole height. The row is the size container the scope's square
+   reads (`100cqh`), so where the operator drags the strip shorter than the square the square follows. */
+.rtty-wf-row {
+  display: flex;
+  gap: var(--space-2);
+  container-type: size;
+}
+.rtty-wf-row > .waterfall-wrap {
+  flex: 1 1 0;
+  min-width: 0;
 }
 /* JS8's waterfall, SIZED BY ITS DIVIDER (layout L2): the operator drags or arrows its height,
    stored per surface (`nexus.split.js8.waterfall`) and clamped against the live box on load and
@@ -28340,6 +28723,59 @@ button.sat-chip:disabled {
 .jtty-call:focus-visible {
   color: var(--accent);
 }
+/* JTTY's F-keys while ✎ Edit keys is on: each key is its template's line edit (WSJT-X's msg1..msg8),
+   in the key's own grid track so nothing in the dock moves; the input ellipsizes inside it. */
+.jtty-fkey-edit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.jtty-fkey-edit > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* WSJT-X's "JTTY review" spacer: a quiet rule with its words, before the first line a decode-again
+   found, in each pane. */
+.jtty-review-heading {
+  margin: var(--space-1) 0;
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--border);
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+}
+/* The Log QSO prompt after a TU send: one quiet line at the top of the log pane, the question and its
+   two buttons, wrapping on a narrow pane. It covers nothing; the strip below it is unchanged. */
+.jtty-log-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-label);
+}
+/* Under the question, when it replaced one never answered: whose that was, quieter than the question. */
+.jtty-log-prompt-note {
+  color: var(--text-dim);
+}
+/* WSJT-X's "Frames: sent/total" before Send: a quiet count, its digits steady as they change. */
+.jtty-frames {
+  flex: 0 0 auto;
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The message style beside the Call box and the serial: a label and WSJT-X's two choices. */
+.jtty-style {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+}
 /* Rx and F Tol in the header's control cluster: WSJT-X's two spin boxes, side by side. */
 .jtty-rx-controls {
   display: inline-flex;
@@ -28393,7 +28829,7 @@ button.sat-chip:disabled {
   background: var(--accent);
   border-color: var(--accent);
 }
-/* RTTY TUNING SCOPE — the insides of the column (its size is cockpit-panes.css `.rtty-tuning`).
+/* RTTY TUNING SCOPE — the insides of the column (its size is cockpit-panes.css `.rtty-tuning-box`).
    The picture's colours are read off the canvas's own computed tokens (--bg, --rx, --text-faint,
    --text-dim), so it follows both themes with no token of its own. */
 /* Shown over the square when there is nothing to draw: disarmed, or our own over. */
@@ -28760,7 +29196,9 @@ button.sat-chip:disabled {
   position: relative;
   display: flex;
   min-width: 0;
-  background: var(--bg);
+  /* The operator's compose colours and font (features/js8PaneStyle; JS8Call's Composition tab), each
+     the theme's until picked. */
+  background: var(--js8-compose-bg, var(--bg));
   border-radius: var(--radius-sm);
 }
 .js8-compose {
@@ -28783,6 +29221,9 @@ button.sat-chip:disabled {
   width: 100%;
   min-width: 0;
   background: transparent;
+  color: var(--js8-compose-fg, var(--text));
+  font-family: var(--js8-compose-font-family, var(--font-mono));
+  font-size: var(--js8-compose-font-size, calc(14px * var(--text-scale)));
 }
 .js8-compose-backdrop {
   position: absolute;
@@ -28832,6 +29273,60 @@ button.sat-chip:disabled {
   text-decoration-style: wavy;
   text-decoration-color: var(--snr-weak);
   text-decoration-skip-ink: none;
+}
+/* Settings ▸ JS8 ▸ Colours and fonts (Js8PaneStyleSettings): per pane, its sample (drawn by the pane's
+   own rules), its colour pickers in a row that wraps, its fonts, and a Reset. */
+.js8-style-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+.js8-style-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.js8-style-sample {
+  flex: none;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+/* The compose sample is a picture of the box, never a field: disabled, drawn as the box is. */
+.js8-style-sample > .js8-compose:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.js8-style-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+.js8-style-color,
+.js8-style-font {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+.js8-style-color input[type='color'] {
+  inline-size: 2.4em;
+  block-size: 1.6em;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+.js8-style-family {
+  flex: 1 1 12em;
+  min-width: 0;
+}
+.js8-style-size {
+  flex: 0 0 6em;
 }
 /* Settings ▸ JS8 ▸ Composing: the saved messages, one row each, and the row that adds one. */
 .js8-saved-list {
@@ -29106,6 +29601,35 @@ button.sat-chip:disabled {
 .js8-rx-line .js8-freq {
   white-space: nowrap;
 }
+/* THE OPERATOR'S COLOURS AND FONTS (Settings ▸ Digital ▸ JS8 ▸ Colours and fonts: JS8Call's UI
+   settings, features/js8PaneStyle). The cockpit sets a --js8-* property only for what the operator
+   picked, for the theme the page paints, and each falls back to the token the pane always had. The
+   RX pane: its background, the received text and my own; JS8Call paints a line whole in the one or
+   the other, its time and offset included (mainwindow.cpp:3247-3255). */
+.js8-rx {
+  background: var(--js8-rx-bg, transparent);
+}
+.js8-rx .js8-rx-line {
+  color: var(--js8-rx-fg, var(--text));
+  font-family: var(--js8-rx-font-family, var(--font-mono));
+  font-size: var(--js8-rx-font-size, var(--fs-label));
+}
+.js8-rx .js8-rx-line.mine {
+  color: var(--js8-tx-fg, var(--accent));
+  font-family: var(--js8-tx-font-family, var(--font-mono));
+  font-size: var(--js8-tx-font-size, var(--fs-label));
+}
+.js8-rx .js8-rx-line .js8-time,
+.js8-rx .js8-rx-line .js8-freq {
+  color: var(--js8-rx-fg, var(--text-dim));
+}
+.js8-rx .js8-rx-line.mine .js8-time,
+.js8-rx .js8-rx-line.mine .js8-freq {
+  color: var(--js8-tx-fg, var(--text-dim));
+}
+.js8-rx .cw-decode-idle {
+  color: var(--js8-rx-fg, var(--text-faint));
+}
 /* Band activity, the call list and the inbox are tables: a column is as wide as what it holds, as
    JS8Call's resize-to-contents makes it, and the message column takes the rest and wraps. The rows
    keep the class names the panes always had; a table row is a table row whatever else they say. */
@@ -29141,22 +29665,49 @@ button.sat-chip:disabled {
 .js8-table tr.directed > td:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
 }
+/* The operator's colour for traffic to me in Band activity (JS8Call's "Directed Messages Background",
+   displayBandActivity.cpp:293-301), under every other row colour, as JS8Call paints it first. */
+:is(.js8-band-table, .js8-call-table) tr.directed {
+  background: var(--js8-table-directed, transparent);
+}
 .js8-table tr.selected {
   background: var(--bg-elev-2);
 }
-/* JS8Call's row colours, from the theme: a CQ green, the two highlight lists amber and blue (the
-   primary wins: it is the later rule). */
+:is(.js8-band-table, .js8-call-table) tr.selected {
+  background: var(--js8-table-selected, var(--bg-elev-2));
+}
+/* JS8Call's row colours, from the theme until the operator picks them: a CQ green, the two highlight
+   lists amber and blue (the primary wins: it is the later rule). */
 .js8-table tr.cq {
-  background: color-mix(in srgb, var(--snr-strong) 16%, transparent);
+  background: var(--js8-table-cq, color-mix(in srgb, var(--snr-strong) 16%, transparent));
 }
 .js8-table tr.hl-secondary {
-  background: color-mix(in srgb, var(--alert-info) 22%, transparent);
+  background: var(--js8-table-secondary, color-mix(in srgb, var(--alert-info) 22%, transparent));
 }
 .js8-table tr.hl-primary {
-  background: color-mix(in srgb, var(--snr-marginal) 26%, transparent);
+  background: var(--js8-table-primary, color-mix(in srgb, var(--snr-marginal) 26%, transparent));
 }
 .js8-table tr.low {
   color: var(--text-dim);
+}
+/* The two lists' background, text and font (JS8Call's Band && Call Activity tab: one set for both,
+   displayBandActivity.cpp:340-366, displayCallActivity.cpp:447-456). The operator's text colour is
+   the whole row's, as JS8Call's, the dim cells and the calls included. */
+:is(.js8-band-table, .js8-call-table) {
+  background: var(--js8-table-bg, transparent);
+  color: var(--js8-table-fg, var(--text));
+  font-family: var(--js8-table-font-family, var(--font-mono));
+  font-size: var(--js8-table-font-size, var(--fs-label));
+}
+:is(.js8-band-table, .js8-call-table) :is(.js8-time, .js8-freq, .js8-snr, .js8-age, .js8-dt, .js8-dist, .js8-az, .js8-opcomment),
+:is(.js8-band-table, .js8-call-table) tr.low {
+  color: var(--js8-table-fg, var(--text-dim));
+}
+.js8-call-table .js8-station-call {
+  color: var(--js8-table-fg, var(--accent));
+}
+.js8-call-table .js8-group .js8-station-call {
+  color: var(--js8-table-fg, var(--text));
 }
 .js8-call-table tr.unread {
   font-weight: 700;
@@ -29235,8 +29786,25 @@ button.sat-chip:disabled {
 }
 .js8-sound {
   display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+}
+/* A sound's WAV file, on its own line under the switch and Test: the file's name (the whole path on
+   hover) or "Built-in tone", Choose… and Reset to built-in. The row is a row (a settings field is a
+   column), and it wraps rather than widen the panel. */
+.js8-sound-file {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.js8-sound-file-name {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
 }
 .js8-mark-input {
   max-width: 6em;
@@ -29793,6 +30361,13 @@ button.sat-chip:disabled {
   padding: 1px var(--space-1);
   font-size: calc(12px * var(--text-scale));
 }
+.aprs-beacon-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: calc(10px * var(--text-scale));
+  line-height: 1.4;
+}
 .aprs-beacon-comment {
   flex: 1;
   min-width: 120px;
@@ -29898,7 +30473,8 @@ button.sat-chip:disabled {
 .aprs-card {
   position: absolute;
   top: var(--space-2);
-  left: var(--space-2);
+  /* Top RIGHT of the map: the Layers panel holds the top left (`.map-layers`). */
+  right: var(--space-2);
   z-index: 30;
   width: 19rem;
   max-height: calc(100% - var(--space-4));
@@ -31055,14 +31631,9 @@ tr.sel .aprs-sym {
   border-radius: 8px;
   overflow: hidden;
 }
-/* The map-side switch (layout L7): a chip in the map's top-right corner, over the map rather than
-   in the header, where one more chip wraps the row at some widths and takes a line from the body.
-   Below the station card (z 30), which may cover it while a station is open. */
+/* The map-side switch (layout L7): a chip in the map's own toolbar (MapView `aprsToolbar`), which
+   wraps, rather than in the header, where one more chip wraps the row and takes a line from the body. */
 .aprs-map-side {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
-  z-index: 20;
   background: var(--panel);
 }
 /* On, it is the header chips' `.active`, laid on the panel so the map never shows through. */
@@ -32278,6 +32849,123 @@ tr.sel .aprs-sym {
 .contest-setup-warn p {
   margin: 0 0 var(--space-1);
 }
+/* ── The radio setup (RadioSetupWizard.tsx). The dialog box is its one scroll owner (.ui-dialog);
+   the band grid scrolls sideways inside its own wrapper only when a station has many radios, and
+   the step buttons stay at the bottom edge of the box, opaque, so Finish is always reachable. ── */
+.ui-dialog.radio-setup {
+  width: min(760px, calc(100vw - 2 * var(--space-4)));
+}
+.radio-setup .wizard-dots {
+  flex-wrap: wrap;
+}
+.radio-setup .wizard-actions {
+  position: sticky;
+  bottom: 0;
+  background: var(--panel);
+  padding-top: var(--space-2);
+}
+.radio-setup-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(16em, 100%), 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.radio-setup-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-2);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+.radio-setup-card .wizard-field {
+  min-width: 0;
+}
+.radio-setup-tick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-body);
+}
+.radio-setup-meta,
+.radio-setup-card .settings-hint {
+  margin: 0;
+}
+.radio-setup-warn {
+  color: var(--alert-warning);
+}
+.radio-setup-test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.radio-setup-test .settings-hint.ok {
+  color: var(--state-good);
+}
+.radio-setup-test .settings-hint.bad {
+  color: var(--state-weak);
+}
+.radio-setup-grid {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin-bottom: var(--space-2);
+  font-size: var(--fs-body);
+}
+.radio-setup-grid th,
+.radio-setup-grid td {
+  padding: 2px var(--space-2);
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+.radio-setup-grid th[scope='row'] {
+  text-align: left;
+  font-family: var(--font-mono);
+}
+.radio-setup-grid tr.shared th[scope='row'] {
+  color: var(--accent);
+  font-weight: 700;
+}
+.radio-setup-shared {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.radio-setup-shared > legend {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+.radio-setup-mode {
+  min-width: min(11em, 100%);
+}
+.radio-setup-facts,
+.radio-setup-lines,
+.radio-setup-rules {
+  margin: 0 0 var(--space-2);
+  padding-left: 1.4em;
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+.radio-setup-policy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.radio-setup-probe {
+  margin-bottom: var(--space-3);
+}
+.radio-setup-answer {
+  font-weight: 700;
+}
 .contest-setup-bad {
   margin: 0 0 var(--space-2);
   color: var(--state-weak);
@@ -33347,4 +34035,40 @@ td.aw-cc {
   flex-direction: column;
   gap: 2px;
   color: var(--text-dim);
+}
+
+/* IOTA beside a reference (components/Iota.tsx): the group's name with IOTA Ltd's credit, the
+   consent line, the "not on the list" warning, and the offer chip. Plain text styles only; no
+   sizing (the hosts own their boxes). */
+.iota-name,
+.iota-unknown {
+  display: block;
+  font-size: calc(11px * var(--text-scale));
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+.iota-unknown {
+  color: var(--state-warn);
+}
+.iota-credit {
+  color: var(--text-faint);
+  font-size: calc(10px * var(--text-scale));
+}
+.iota-offer,
+.iota-card-held {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font-size: calc(11px * var(--text-scale));
+  color: var(--text-dim);
+}
+.iota-offer-from {
+  color: var(--text-faint);
+}
+/* Use, pressed: the reference goes into the log with the contact. */
+.iota-offer .settings-test-btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
 }

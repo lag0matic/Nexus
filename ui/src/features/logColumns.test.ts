@@ -16,19 +16,21 @@ import {
   renderedColumns,
   uploadMark,
   visibleColumns,
+  withColumnMoved,
   withColumnShown,
+  withColumnStep,
   withColumnWidth,
   type LogColumnsSaved,
 } from './logColumns'
 import type { LoggedQso } from '../types'
 
 /** `.logbook-row`'s template before the model (styles.css, 59aeae99e). */
-const OLD_COMPACT = '1fr 1.3fr 0.7fr 1fr 0.7fr 0.6fr 0.6fr 1fr 0.6fr 0.9fr 0.7fr 1.4fr minmax(384px, 0.8fr)'
+const OLD_COMPACT = '1fr 1.3fr 0.7fr 1fr 0.7fr 0.6fr 0.6fr 1fr 0.6fr 0.9fr 0.7fr 1.4fr minmax(436px, 0.8fr)'
 /** `[data-viewport='sm'] .logbook-row`'s. */
-const OLD_NARROW = '1fr 1.3fr 0.7fr 0.7fr 1fr minmax(384px, 0.8fr)'
+const OLD_NARROW = '1fr 1.3fr 0.7fr 0.7fr 1fr minmax(436px, 0.8fr)'
 /** `.logbook-table.wide .logbook-row`'s ("More columns"). */
 const OLD_WIDE =
-  '1fr 1.3fr 0.7fr 1fr 0.7fr 0.6fr 0.6fr 1fr 0.6fr 0.9fr 0.7fr 0.9fr 0.8fr 1.1fr 1fr 1fr 0.5fr 0.6fr 0.8fr 1.4fr minmax(384px, 0.8fr)'
+  '1fr 1.3fr 0.7fr 1fr 0.7fr 0.6fr 0.6fr 1fr 0.6fr 0.9fr 0.7fr 0.9fr 0.8fr 1.1fr 1fr 1fr 0.5fr 0.6fr 0.8fr 1.4fr minmax(436px, 0.8fr)'
 
 const template = (saved: LogColumnsSaved, narrow = false) =>
   logGridTemplate(renderedColumns(saved, narrow), saved, narrow)
@@ -148,6 +150,74 @@ describe('a saved choice is clamped on load', () => {
   })
 })
 
+describe('order', () => {
+  it('a dragged column takes its new place, and the template and the row follow it', () => {
+    const moved = withColumnMoved(DEFAULT_LOG_COLUMNS, 'notes', 'call', 'after')
+    expect(moved.order).toBeDefined()
+    expect(ids(moved)).toEqual(['call', 'notes', 'country', 'band', 'freq', 'mode', 'sent', 'rcvd', 'date', 'time', 'park', 'qsl', 'actions'])
+    // The template is cut from the same list: Notes' share follows Notes.
+    expect(template(moved).split(' ').slice(0, 3)).toEqual(['1fr', '1.4fr', '1.3fr'])
+    // Before the first column, and back.
+    expect(ids(withColumnMoved(moved, 'qsl', 'call', 'before')).slice(0, 2)).toEqual(['qsl', 'call'])
+  })
+
+  it('the action cluster stays last, whatever is dropped on it, and never moves itself', () => {
+    const toEnd = withColumnMoved(DEFAULT_LOG_COLUMNS, 'call', 'actions', 'after')
+    expect(ids(toEnd).slice(-2)).toEqual(['call', 'actions'])
+    expect(withColumnMoved(DEFAULT_LOG_COLUMNS, 'actions', 'call', 'before')).toBe(DEFAULT_LOG_COLUMNS)
+  })
+
+  it('a step moves a column past its rendered neighbour, and stops at either end', () => {
+    const cols = renderedColumns(DEFAULT_LOG_COLUMNS, false)
+    const right = withColumnStep(DEFAULT_LOG_COLUMNS, cols, 'country', 1)
+    expect(ids(right).slice(0, 3)).toEqual(['call', 'band', 'country'])
+    expect(withColumnStep(DEFAULT_LOG_COLUMNS, cols, 'call', -1)).toBe(DEFAULT_LOG_COLUMNS)
+    // The last data column cannot step past the action cluster.
+    expect(withColumnStep(DEFAULT_LOG_COLUMNS, cols, 'notes', 1)).toBe(DEFAULT_LOG_COLUMNS)
+    // At a narrow window the neighbour is the one on screen: Country past Band, then past QSL.
+    const narrow = renderedColumns(DEFAULT_LOG_COLUMNS, true)
+    const once = withColumnStep(DEFAULT_LOG_COLUMNS, narrow, 'band', 1)
+    expect(ids(once, true)).toEqual(['call', 'country', 'qsl', 'band', 'notes', 'actions'])
+  })
+
+  it('moving a column back to where it began saves no order at all', () => {
+    const there = withColumnMoved(DEFAULT_LOG_COLUMNS, 'band', 'call', 'before')
+    const back = withColumnMoved(there, 'band', 'country', 'after')
+    expect(back).toEqual(DEFAULT_LOG_COLUMNS)
+    expect('order' in back).toBe(false)
+  })
+
+  it('a column turned on later shows beside its default neighbour in the moved table', () => {
+    // Notes moved to the front, then IOTA turned on: IOTA sits after Grid's default neighbour
+    // chain (it follows Grid by default), so after the last default column before it.
+    const moved = withColumnMoved(DEFAULT_LOG_COLUMNS, 'notes', 'call', 'before')
+    const withIota = withColumnShown(moved, 'iota', true)
+    expect(ids(withIota)).toEqual(['notes', 'call', 'country', 'band', 'freq', 'mode', 'sent', 'rcvd', 'date', 'time', 'park', 'qsl', 'iota', 'actions'])
+  })
+
+  it('a saved order is clamped on load: unknown and repeated ids dropped, the actions ignored, the rest placed', () => {
+    const got = clampLogColumns({ shown: [], hidden: [], widths: {}, order: ['notes', 'nope', 7, 'notes', 'actions', 'call'] }, 1366)
+    expect(ids(got).slice(0, 3)).toEqual(['notes', 'call', 'country'])
+    expect(ids(got).slice(-1)).toEqual(['actions'])
+    // An order that is not a list, or is the default one, is no order.
+    expect(clampLogColumns({ shown: [], hidden: [], widths: {}, order: 'notes' }, 1366)).toEqual(DEFAULT_LOG_COLUMNS)
+    expect(clampLogColumns({ shown: [], hidden: [], widths: {}, order: LOG_COLUMNS.map((c) => c.id) }, 1366)).toEqual(DEFAULT_LOG_COLUMNS)
+  })
+
+  it('an old saved choice (no order) loads exactly as it did', () => {
+    const old = { shown: ['iota'], hidden: ['freq'], widths: { country: 210 } }
+    const got = clampLogColumns(old, 1366)
+    expect(got).toStrictEqual(old)
+    expect(ids(got)).toEqual(visibleColumns(old).map((c) => c.id))
+    expect(ids(got)).toEqual(LOG_COLUMNS.filter((c) => c.fixed || (c.base ? c.id !== 'freq' : c.id === 'iota')).map((c) => c.id))
+  })
+
+  it('round-trips an order through JSON as settings.json keeps it', () => {
+    const saved = withColumnMoved(withColumnShown(DEFAULT_LOG_COLUMNS, 'grid', true), 'grid', 'call', 'after')
+    expect(clampLogColumns(JSON.parse(JSON.stringify(saved)), 1366)).toEqual(saved)
+  })
+})
+
 describe('the values the added columns print', () => {
   const q = {
     call: 'DL1ABC',
@@ -196,6 +266,14 @@ describe('the values the added columns print', () => {
       // No exchange logged on this side: the serial.
       exchRcvd: '345',
     })
+  })
+
+  it('a distance that is not a number, a 0x one among them, prints as it came', () => {
+    const at = (v: string) => addedColumnText({ ...q, extra: [['DISTANCE', v]] } as LoggedQso, 'distance')
+    expect(at('approx 500')).toBe('approx 500')
+    expect(at('0x10')).toBe('0x10')
+    expect(at('0b11')).toBe('0b11')
+    expect(at('  9.6 ')).toBe('10')
   })
 
   it('marks each upload stamp', () => {

@@ -146,11 +146,7 @@ impl Station {
 
     /// [`Self::run_to`], with a logger's WSJT-X UDP link.
     fn run_with(&mut self, wsjtx: Option<&WsjtxServer>, until: f64) {
-        let sinks = Sinks {
-            wsjtx,
-            psk: None,
-            cfg_dial_hz: FT8_DIAL,
-        };
+        let sinks = Sinks { wsjtx, psk: None };
         let (mut ra, mut rr) = (mock_reopen_audio(), mock_reopen_rig());
         let mut station = StationSinks::new();
         while self.t <= until {
@@ -474,6 +470,9 @@ fn a_loggers_halt_tx_whose_unkey_the_radio_refuses_says_so_and_the_unkey_goes_on
         logger
             .send_to(&halt_tx_datagram(), server.local_addr().unwrap())
             .unwrap();
+        // A datagram arrives between ticks, as in `udp_requests::deliver`: loopback need not
+        // deliver it before `send_to` returns (WSL2's mirrored networking never does).
+        std::thread::sleep(Duration::from_millis(20));
         s.run_with(Some(&server), cut);
         assert_eq!(
             s.state.tx_until_ms, None,

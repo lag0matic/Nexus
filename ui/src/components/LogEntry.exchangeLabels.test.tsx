@@ -180,6 +180,10 @@ const TABLE: [string, string, string[], string[]][] = [
   ['arrlvhf_jan', '', ['Grid'], ['']],
   ['arrlvhf_jun', '', ['Grid'], ['']],
   ['arrlvhf_sep', '', ['Grid'], ['']],
+  // The RTTY Roundup's two received boxes, either of which a contact fills: a W/VE station's state
+  // or province, a DX station's serial.
+  ['arrlrtty', 'w_ve', ['RST', 'State', 'Serial'], ['', '', '']],
+  ['arrlrtty', 'dx', ['RST', 'State', 'Serial'], ['', '', '']],
 ]
 
 describe('every received box in every shipped contest says what it holds', () => {
@@ -214,6 +218,10 @@ describe('controls', () => {
     expect(document.querySelectorAll('.le-fd-cap')).toHaveLength(0)
     expect([...document.querySelectorAll<HTMLInputElement>('input')].map((i) => i.placeholder)).toEqual(
       NON_CONTEST_PLACEHOLDERS,
+    )
+    // The shared comment is the line's one multi-line box, in a row of its own.
+    expect([...document.querySelectorAll<HTMLTextAreaElement>('textarea')].map((i) => i.placeholder)).toContain(
+      t('logEntry.comment.placeholder'),
     )
   })
 
@@ -254,7 +262,6 @@ const NON_CONTEST_PLACEHOLDERS: string[] = [
   t('logEntry.qth.placeholder'),
   t('logEntry.state.placeholder'),
   t('logEntry.country.placeholder'),
-  t('logEntry.comment.placeholder'),
   t('logEntry.park.ref.placeholderPota'),
 ]
 

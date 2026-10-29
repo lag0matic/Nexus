@@ -42,7 +42,9 @@
 //! 3. **Revisions name what the answer was cut from.** A page carries `revision` (the log's),
 //!    `orderRev` (the `index_rev` its order was built at) and `contentRev` (the `content_rev` its
 //!    rows were read at). An upload stamp or a QSL-sent mark moves `content_rev` and not
-//!    `index_rev`, so the order survives it and only the rows are read again.
+//!    `index_rev`, so the order survives it and only the rows are read again — except an order
+//!    that reads what those marks change (a sent filter, an upload or QSL-sent-date sort), which
+//!    is built again, and whose `orderRev` moves with it ([`Capture::order_rev`]).
 
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
@@ -241,6 +243,20 @@ impl Capture {
         }
     }
 
+    /// The revision `query`'s order is built at, which a page and a place name it by (`orderRev`):
+    /// the `index_rev`, or for an order that reads what a stamp changes
+    /// ([`LogQuery::reads_content`]) the later of it and the `content_rev`. Every watermark is a
+    /// revision from one counter, so this moves whenever such an order may have, and never back:
+    /// the window, which keeps pages by (query, orderRev, offset), never files a page of a new
+    /// order beside an old one's.
+    fn order_rev(&self, query: &LogQuery) -> u64 {
+        if query.reads_content() {
+            self.index_rev.max(self.content_rev)
+        } else {
+            self.index_rev
+        }
+    }
+
     fn is_store(&self) -> bool {
         matches!(self.rows, LogRows::Store(_))
     }
@@ -297,8 +313,9 @@ fn json<T: Serialize>(answer: T) -> Result<Value, String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OrderKey {
     index_rev: u64,
-    /// The `content_rev` too, for a filter on what was SENT: an upload stamp and a card marked
-    /// sent move only `content_rev`, and the rows such a filter lets through move with them.
+    /// The `content_rev` too, for an order that reads what was SENT ([`LogQuery::reads_content`]):
+    /// an upload stamp and a card marked sent move only `content_rev`, and the rows a sent filter
+    /// lets through, and the order of an upload or QSL-sent-date sort, move with them.
     content_rev: Option<u64>,
     query: LogQuery,
 }
@@ -541,7 +558,7 @@ impl LogQueries {
     ) -> Result<Arc<Vec<u32>>, String> {
         let key = OrderKey {
             index_rev: c.index_rev,
-            content_rev: query.filter.reads_sent().then_some(c.content_rev),
+            content_rev: query.reads_content().then_some(c.content_rev),
             query: query.clone(),
         };
         let slot = {
@@ -624,7 +641,12 @@ impl LogQueries {
                     }
                     extras.sort_unstable();
                     extras.dedup();
-                    if query.filter.is_empty() && extras.is_empty() && columns == ORDER_COLUMNS {
+                    let children = b.children();
+                    if query.filter.is_empty()
+                        && extras.is_empty()
+                        && children.is_empty()
+                        && columns == ORDER_COLUMNS
+                    {
                         // Exactly the pass the Logbook always made.
                         if b.searches() {
                             db.each_narrow_after_with_submode(
@@ -638,9 +660,10 @@ impl LogQueries {
                             })?;
                         }
                     } else {
-                        db.each_filtered(
+                        db.each_filtered_with(
                             &columns,
                             &extras,
+                            children,
                             b.searches(),
                             &query.filter,
                             &mut |rowid, r| b.push(rowid, r),
@@ -685,7 +708,7 @@ impl LogQueries {
         json(PageAnswer {
             query: query.clone(),
             revision: c.revision,
-            order_rev: c.index_rev,
+            order_rev: c.order_rev(query),
             content_rev: c.content_rev,
             total: order.len(),
             log_size,
@@ -714,7 +737,7 @@ impl LogQueries {
         };
         json(LocateAnswer {
             query: query.clone(),
-            order_rev: c.index_rev,
+            order_rev: c.order_rev(query),
             index: handle.and_then(|h| order.iter().position(|&x| x == h)),
         })
     }
@@ -1064,18 +1087,28 @@ impl LogQueries {
                     ],
                     uploads: false,
                 };
-                rows.each_with(VUCC, &[], Scope::All, Order::Log, &mut |r| {
-                    let band = r.band.trim().to_ascii_lowercase();
-                    if !crate::qso_is_sat(r.prop_mode.as_deref()) && vucc_bands.contains(&band) {
-                        if let Some(sq) = r.grid.as_deref().and_then(vucc_square) {
-                            if r.award_confirmed {
-                                confirmed.insert((band.clone(), sq.clone()));
+                rows.each_with(
+                    VUCC,
+                    &[tempo_core::logbook::callbook::MAP_ONLY_GRID_FIELD],
+                    Scope::All,
+                    Order::Log,
+                    &mut |r| {
+                        let band = r.band.trim().to_ascii_lowercase();
+                        if !crate::qso_is_sat(r.prop_mode.as_deref()) && vucc_bands.contains(&band)
+                        {
+                            // Never a grid for the map only (`counted_grid`).
+                            if let Some(sq) =
+                                tempo_core::logbook::counted_grid(r).and_then(vucc_square)
+                            {
+                                if r.award_confirmed {
+                                    confirmed.insert((band.clone(), sq.clone()));
+                                }
+                                worked.insert((band, sq));
                             }
-                            worked.insert((band, sq));
                         }
-                    }
-                    ControlFlow::Continue(())
-                })
+                        ControlFlow::Continue(())
+                    },
+                )
                 .map_err(unreadable)?;
                 for (band, sq) in worked.difference(&confirmed) {
                     open.entry(band.clone()).or_default().insert(sq.clone());
@@ -1212,8 +1245,7 @@ fn needed(
                 _ => n.vucc_bands.contains(&label),
             };
             !sat && on_band
-                && r.grid
-                    .as_deref()
+                && tempo_core::logbook::counted_grid(r)
                     .and_then(vucc_square)
                     .is_some_and(|sq| on(&label).is_some_and(|open| open.contains(&sq)))
         }

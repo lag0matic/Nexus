@@ -30,8 +30,10 @@ use tempo_app::dto::LoggedQso;
 use tempo_app::engine::Engine;
 use tempo_app::logstore::LogRows;
 use tempo_app::station::{MadeRow, RowRefusal};
-use tempo_core::logbook::sqlite::{call_norm_of, Narrow, Scope};
-use tempo_core::logbook::{LogOp, QsoEdit, QsoRecord, RecordId};
+use tempo_core::logbook::sqlite::{call_norm_of, Narrow, Order, Scope};
+use tempo_core::logbook::{
+    qsl_card_queued, FieldEdit, LogOp, QsoEdit, QsoRecord, RecordId, QSL_QUEUE_FIELD,
+};
 
 mod picture;
 
@@ -147,24 +149,39 @@ async fn change_row(
 /// paper-card mark (`QsoEdit`'s rules). Refused as `gone` / `changed` like every change here;
 /// an `Err` is an edit that must not be sent again as it is (a QSL-sent code the form does not
 /// offer).
+///
+/// `fields`: the Logbook contact card's changes to the fields kept as written (`FieldEdit`), in
+/// the same change; absent from the edit form.
 #[tauri::command]
 pub async fn edit_qso_by_id(
     state: State<'_, SharedEngine>,
     target: RowRef,
     edit: QsoEdit,
+    fields: Option<Vec<FieldEdit>>,
 ) -> Result<RowAnswer, String> {
-    edit_row(Arc::clone(&state), target, edit).await
+    edit_row_with_fields(Arc::clone(&state), target, edit, fields.unwrap_or_default()).await
 }
 
+/// [`edit_row_with_fields`] with no field changes — the edit form's save, as the tests make it.
+#[cfg(test)]
 pub(crate) async fn edit_row(
     engine: SharedEngine,
     target: RowRef,
     edit: QsoEdit,
 ) -> Result<RowAnswer, String> {
+    edit_row_with_fields(engine, target, edit, Vec::new()).await
+}
+
+pub(crate) async fn edit_row_with_fields(
+    engine: SharedEngine,
+    target: RowRef,
+    edit: QsoEdit,
+    fields: Vec<FieldEdit>,
+) -> Result<RowAnswer, String> {
     let id = id_of(&target)?;
     durable_command(move || {
         let (made, durability) = tempo_app::logwrite::until_written(|| {
-            tempo_app::logwrite::edit_row(&engine, id, &target.edit_key, &edit)
+            tempo_app::logwrite::edit_row_with_fields(&engine, id, &target.edit_key, &edit, &fields)
         });
         (
             made.map(|made| match made {
@@ -312,6 +329,77 @@ pub async fn delete_qso_by_id(
 
 pub(crate) async fn delete_row(engine: SharedEngine, target: RowRef) -> Result<RowAnswer, String> {
     change_row(engine, target, LogOp::Delete).await
+}
+
+/// Put the contact `target` in the cards-to-send queue (`queued`: ADIF `QSL_SENT=Q`) or take it
+/// out. A field kept as written ([`LogOp::SetFields`]), so it is recorded in the contact's history
+/// and undone as any other. Marking the card sent takes it out as well
+/// ([`crate::mark_qsl_sent`]).
+#[tauri::command]
+pub async fn queue_qsl_card_by_id(
+    state: State<'_, SharedEngine>,
+    target: RowRef,
+    queued: bool,
+) -> Result<RowAnswer, String> {
+    queue_card(Arc::clone(&state), target, queued).await
+}
+
+pub(crate) async fn queue_card(
+    engine: SharedEngine,
+    target: RowRef,
+    queued: bool,
+) -> Result<RowAnswer, String> {
+    change_row(engine, target, move |id| LogOp::SetFields {
+        id,
+        fields: vec![(QSL_QUEUE_FIELD.to_string(), queued.then(|| "Q".to_string()))],
+    })
+    .await
+}
+
+/// The contacts whose paper QSL card is still to go out ([`qsl_card_queued`]: `QSL_SENT` `Q` or
+/// `R`, not marked sent), in log order, each with the key a change to it must send.
+#[tauri::command]
+pub async fn qsl_card_queue(state: State<'_, SharedEngine>) -> Result<Vec<KeyedRow>, String> {
+    let engine = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || card_queue(&engine))
+        .await
+        .map_err(|e| format!("the logbook read did not finish: {e}"))?
+}
+
+/// What the cards-to-send pass reads of each row: the sent mark, and the field the queue is.
+const CARD_QUEUE: Narrow = Narrow {
+    columns: &["qsl_sent"],
+    uploads: false,
+};
+
+pub(crate) fn card_queue(engine: &SharedEngine) -> Result<Vec<KeyedRow>, String> {
+    // Handles under the lock; the reads after it is released.
+    let rows = tempo_app::engine::engine_lock(engine).log_rows();
+    let mut ids = Vec::new();
+    rows.each_with(
+        CARD_QUEUE,
+        &[QSL_QUEUE_FIELD],
+        Scope::All,
+        Order::Log,
+        &mut |r| {
+            if qsl_card_queued(r) {
+                ids.extend(r.id);
+            }
+            std::ops::ControlFlow::Continue(())
+        },
+    )
+    .map_err(|e| e.to_string())?
+    .or_refuse()?;
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (whole, fresh) = rows.rows_by_ids(&ids).map_err(|e| e.to_string())?;
+    fresh.or_refuse()?;
+    Ok(whole
+        .iter()
+        .filter(|r| qsl_card_queued(r))
+        .map(keyed)
+        .collect())
 }
 
 // ── A row the log view showed, found again by its content ───────────────────────────────────
@@ -466,9 +554,11 @@ mod tests {
     use tempo_app::engine::engine_lock;
     use tempo_core::logbook::{QslVia, UploadOutcome};
 
-    const COMMANDS: [&str; 6] = [
+    const COMMANDS: [&str; 8] = [
         "edit_qso_by_id",
         "mark_qsl_sent_by_id",
+        "queue_qsl_card_by_id",
+        "qsl_card_queue",
         "mark_qsl_card_by_id",
         "set_sat_tag_by_id",
         "set_dxcc_by_id",
@@ -617,6 +707,71 @@ mod tests {
             Ok(RowAnswer::Deleted {})
         );
         assert!(on_disk(&dir, &target.id).is_none(), "deleted on disk");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ★ The cards-to-send queue end to end, on disk: a queued contact is listed, and only it;
+    /// marking its card sent takes it off the list and writes `QSL_SENT=Y` in place of the `Q`,
+    /// and nothing else about the contact moves. Taking a card out of the queue lists it no more.
+    #[test]
+    fn a_queued_card_is_listed_until_it_is_marked_sent_and_nothing_else_moves() {
+        let (dir, engine) = engine_on_store("card-queue", 6);
+        let rt = runtime();
+        assert!(card_queue(&engine).expect("read").is_empty());
+
+        let (target, before) = row_ref(&engine, 2);
+        let now = current(
+            rt.block_on(queue_card(engine.clone(), target.clone(), true))
+                .expect("made"),
+        );
+        let listed = card_queue(&engine).expect("read");
+        assert_eq!(
+            listed.iter().map(|k| k.row.id.clone()).collect::<Vec<_>>(),
+            vec![Some(target.id.clone())]
+        );
+        assert_eq!(
+            listed[0].edit_key, now.edit_key,
+            "listed with the key a change must send"
+        );
+        let queued = on_disk(&dir, &target.id).expect("held");
+        assert!(qsl_card_queued(&queued));
+
+        let next = RowRef {
+            id: target.id.clone(),
+            edit_key: listed[0].edit_key.clone(),
+        };
+        current(
+            rt.block_on(qsl_sent(engine.clone(), next, Some("B".into())))
+                .expect("made"),
+        );
+        assert!(
+            card_queue(&engine).expect("read").is_empty(),
+            "sent: off the list"
+        );
+        let sent = on_disk(&dir, &target.id).expect("held");
+        let mut expect = before.clone();
+        expect.qsl_sent = sent.qsl_sent;
+        assert_eq!(sent, expect, "only the QSL-sent mark moved");
+        assert!(sent.qsl_sent.sent);
+        let adif = tempo_core::logbook::adif_record(&sent);
+        assert_eq!(adif.matches("QSL_SENT:").count(), 1, "{adif}");
+
+        // Queued and taken out again: listed no more, and the contact as it was.
+        let (target, before) = row_ref(&engine, 4);
+        let now = current(
+            rt.block_on(queue_card(engine.clone(), target.clone(), true))
+                .expect("made"),
+        );
+        let back = RowRef {
+            id: target.id.clone(),
+            edit_key: now.edit_key,
+        };
+        current(
+            rt.block_on(queue_card(engine.clone(), back, false))
+                .expect("made"),
+        );
+        assert!(card_queue(&engine).expect("read").is_empty());
+        assert_eq!(on_disk(&dir, &target.id).expect("held").extra, before.extra);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -916,6 +1071,99 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// ★ The re-review's probe. The K1N contact, logged as the United States (291), is confirmed by
+    /// LoTW as Navassa (182, kept beside the log's) with LoTW's zone. The operator then corrects
+    /// the call to K1NX: LoTW's number described the old call's QSO, so the contact no longer
+    /// counts as Navassa — not in the Awards, the Needed board's needs or the statistics, which all
+    /// read `award_fields` — and LoTW's zone goes with it. By the form and by the whole-contact
+    /// edit a Remote browser sends back with the old extras in it.
+    #[test]
+    fn a_corrected_call_no_longer_counts_under_lotws_number_for_the_old_one() {
+        for remote in [false, true] {
+            let (dir, engine) = engine_with("lotw-call-fix", K1N_2015);
+            let rt = runtime();
+            let (target, _) = row_ref(&engine, 0);
+            current(
+                rt.block_on(set_dxcc(engine.clone(), target.clone(), Some(291)))
+                    .expect("made"),
+            );
+            let report = format!(
+                "{}<CALL:3>K1N<QSO_DATE:8>20150210<TIME_ON:6>123400<BAND:3>20m<MODE:2>CW\
+                 <LOTW_QSL_RCVD:1>Y<DXCC:3>182<CQZ:1>8<EOR>\n",
+                tempo_core::logbook::adif_header()
+            );
+            let (summary, _) = tempo_app::logwrite::until_written(|| {
+                tempo_app::logwrite::merge_lotw_report(&engine, &report)
+            });
+            assert_eq!(summary.expect("merged").matched, 1, "premise: paired");
+            let held = on_disk(&dir, &target.id).expect("held");
+            let counted = |r: &QsoRecord| {
+                propagation::awards::counted_entity(None, &crate::log_folds::award_fields(r))
+                    .and_then(|c| c.code)
+            };
+            assert_eq!(
+                (
+                    counted(&held),
+                    tempo_core::logbook::record_cq_zone(&held),
+                    awards(&engine).dxcc_confirmed
+                ),
+                (Some(182), Some(8), 1),
+                "premise: Navassa, LoTW's zone, confirmed"
+            );
+
+            let key = QsoEdit::project(&held).key();
+            if remote {
+                // As the `edit_qso` command takes it: the row the client was shown, sent back.
+                let mut shown = LoggedQso::from(held.clone());
+                shown.call = "K1NX".into();
+                let sent: QsoRecord = shown.into();
+                let (made, durability) = tempo_app::logwrite::update_row(
+                    &engine,
+                    target.id.parse().expect("an id"),
+                    &key,
+                    |stored| crate::edited_whole(&sent, stored),
+                    |_, _| (),
+                );
+                made.expect("reads").expect("made");
+                durability
+                    .wait(tempo_app::logstore::DURABLE_WAIT)
+                    .expect("durable");
+            } else {
+                let mut fix = QsoEdit::project(&held);
+                fix.call = "K1NX".into();
+                let next = RowRef {
+                    id: target.id.clone(),
+                    edit_key: key,
+                };
+                current(
+                    rt.block_on(edit_row(engine.clone(), next, fix))
+                        .expect("made"),
+                );
+            }
+            let after = on_disk(&dir, &target.id).expect("held");
+            assert_eq!(after.call, "K1NX", "remote: {remote}");
+            assert_eq!(
+                (
+                    tempo_core::logbook::record_lotw_dxcc(&after),
+                    tempo_core::logbook::record_cq_zone(&after)
+                ),
+                (None, None),
+                "LoTW's number and zone for the old call are gone (remote: {remote})"
+            );
+            assert_ne!(counted(&after), Some(182), "remote: {remote}");
+            let summary = awards(&engine);
+            assert!(
+                summary.dxcc_disagreements.is_empty() && summary.dxcc_confirmed == 0,
+                "remote: {remote}"
+            );
+            assert!(
+                !chase(&engine).iter().any(|e| e == "Navassa Island"),
+                "remote: {remote}"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
     /// The number set by hand survives the edit form, which carries no DXCC and leaves it alone as
     /// it leaves every field it does not carry; a callsign correction drops it with the call it
     /// described.
@@ -1032,9 +1280,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The Logbook form names COUNTRY by the DXCC number the contact keeps, not by its call: a K1N
-    /// contact imported as 182 beside the United States is Navassa Island once the operator saves
-    /// any edit to it. With no number left, the form names the call's entity, as it always has.
+    /// The Logbook form corrects a stored COUNTRY that names another entity than the DXCC number
+    /// the contact keeps: a K1N contact imported as 182 beside "United States" is Navassa Island
+    /// once the operator saves any edit to it. With no number left, the form names the call's
+    /// entity, as it always has.
     #[test]
     fn an_edit_names_the_country_by_the_dxcc_number_the_contact_keeps() {
         let (dir, engine) = engine_with("edit-country", K1N_2015_CONTRADICTED);
@@ -1072,6 +1321,84 @@ mod tests {
         assert_eq!(
             pair(&on_disk(&dir, &target.id).expect("held")),
             (None, Some("United States".into()))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ★ Under the launch's own resolvers, an edit keeps a stored COUNTRY that names the contact's
+    /// DXCC entity in another spelling ("fed. rep. of germany") or that the entity table cannot
+    /// place ("Germany", QRZ's) exactly as stored; and a corrected callsign takes the new call's
+    /// country — by the form, and by the whole-contact edit a Remote browser sends with the old
+    /// call's country in it.
+    #[test]
+    fn an_edit_keeps_an_agreeing_country_and_a_corrected_call_takes_its_own() {
+        let rows = [
+            "<CALL:6>DL1ABC<QSO_DATE:8>20240101<TIME_ON:6>120000<BAND:3>20m<MODE:2>CW\
+             <DXCC:3>230<COUNTRY:7>Germany<EOR>\n",
+            "<CALL:6>DL2ABC<QSO_DATE:8>20240102<TIME_ON:6>120000<BAND:3>20m<MODE:2>CW\
+             <DXCC:3>230<COUNTRY:20>fed. rep. of germany<EOR>\n",
+            "<CALL:6>DL3ABC<QSO_DATE:8>20240103<TIME_ON:6>120000<BAND:3>20m<MODE:2>CW\
+             <DXCC:3>230<COUNTRY:20>Fed. Rep. of Germany<EOR>\n",
+            "<CALL:6>DL4ABC<QSO_DATE:8>20240104<TIME_ON:6>120000<BAND:3>20m<MODE:2>CW\
+             <DXCC:3>230<COUNTRY:20>Fed. Rep. of Germany<EOR>\n",
+        ]
+        .concat();
+        let (dir, engine) = engine_with("edit-country-kept", &rows);
+        let rt = runtime();
+        for (at, country) in [(0, "Germany"), (1, "fed. rep. of germany")] {
+            let (target, held) = row_ref(&engine, at);
+            let mut edit = QsoEdit::project(&held);
+            edit.name = Some("Hans".into());
+            current(
+                rt.block_on(edit_row(engine.clone(), target.clone(), edit))
+                    .expect("made"),
+            );
+            let stored = on_disk(&dir, &target.id).expect("held");
+            assert_eq!(
+                (pair(&stored), stored.name.as_deref()),
+                ((Some(230), Some(country.into())), Some("Hans")),
+                "kept exactly as stored"
+            );
+        }
+
+        let (target, held) = row_ref(&engine, 2);
+        let mut edit = QsoEdit::project(&held);
+        edit.call = "K1ABC".into();
+        let now = current(
+            rt.block_on(edit_row(engine.clone(), target.clone(), edit))
+                .expect("made"),
+        );
+        assert_eq!(
+            pair(&on_disk(&dir, &target.id).expect("held")),
+            (None, Some("United States".into())),
+            "the form's corrected call"
+        );
+        assert_eq!(now.row.country.as_deref(), Some("United States"));
+
+        let (target, held) = row_ref(&engine, 3);
+        let id = target.id.parse().expect("an id");
+        let mut sent = held.clone();
+        sent.call = "K2ABC".into();
+        assert_eq!(
+            sent.country.as_deref(),
+            Some("Fed. Rep. of Germany"),
+            "premise"
+        );
+        let (made, durability) = tempo_app::logwrite::update_row(
+            &engine,
+            id,
+            &target.edit_key,
+            |stored| crate::edited_whole(&sent, stored),
+            |_, _| (),
+        );
+        made.expect("reads").expect("made");
+        durability
+            .wait(tempo_app::logstore::DURABLE_WAIT)
+            .expect("durable");
+        assert_eq!(
+            pair(&on_disk(&dir, &target.id).expect("held")),
+            (None, Some("United States".into())),
+            "the whole-contact edit's corrected call"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

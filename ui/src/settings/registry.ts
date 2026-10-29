@@ -115,7 +115,8 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
       'class', 'extra', 'general', 'technician', 'novice', 'advanced',
       'operator name', 'state', 'my call',
       'units', 'miles', 'km', 'kilometres', 'kilometers', 'imperial', 'metric', 'distance',
-      'temperature', 'fahrenheit', 'celsius', 'wind speed'],
+      'temperature', 'fahrenheit', 'celsius', 'wind speed',
+      'experience', 'new to the hobby', 'new ham', 'beginner', 'new to digital', 'experienced'],
   },
 
   // ---- Remote ------------------------------------------------------------------
@@ -198,13 +199,17 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
       // reporter named for 80 m was not. The other two are the SYMPTOM, which is what an
       // operator types when they have never seen the switch: "the icom are back in USB mode".
       'lsb-d', 'back to usb', 'stays in usb',
+      // #393: APRS in DATA-FM on the FT-991A, under the words its menu and the report use.
+      'aprs data-fm', 'aprs fm-data', 'fm pkt port', 'menu 077', 'aprs silent',
       // The #145 declarations. The words here are the SYMPTOM, not the setting name — an
       // operator whose rig keys the moment Nexus opens does not search for "handshake".
       'serial handshake', 'flow control', 'xonxoff', 'rts state', 'dtr state', 'keying line',
       'keys at launch', 'transmits at startup', 'stuck ptt', 'stuck transmit',
       // The Flex client's Beta setting for CW, Tune and the ATU, under the words for what it
       // switches on: an operator looking for it asks how to get CW or the tuner through the client.
-      'flex cw', 'cwx', 'flex tune', 'flex atu'],
+      'flex cw', 'cwx', 'flex tune', 'flex atu',
+      // #417: the waterfall source, under what the operator sees — a coarse Icom scope waterfall.
+      'waterfall source', 'audio waterfall', 'icom scope', 'scope resolution'],
   },
   {
     id: 'audio',
@@ -405,7 +410,9 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
       'band schedule', 'frequency schedule', 'switch bands', 'band hopping',
       'spot', 'spotting', 'js8net', 'aprsis', 'aprs-is', 'never spot', 'aprs relay',
       'rx block list', 'block list', 'hide callsigns', 'highlight', 'end of transmission', 'missing frame',
-      'js8 sounds', 'notifications',
+      'js8 sounds', 'notifications', 'wav', 'sound file', 'sound output', 'output device',
+      'reset activity', 'reset at startup', 'clear lists at startup',
+      'colours', 'colors', 'fonts', 'font', 'font size', 'background colour', 'text colour', 'highlight colour',
       'js8call api', 'api', 'tcp', 'udp', '2442', '2242', 'accept requests'],
   },
   {
@@ -524,6 +531,12 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     tab: 'logbook',
     keywords: ['cty', 'cty.dat', 'dxcc', 'country file', 'entities', 'ad1c', 'prefix',
       'country'],
+  },
+  {
+    id: 'iota-list',
+    label: 'IOTA island list',
+    tab: 'logbook',
+    keywords: ['iota', 'islands on the air', 'island', 'island group', 'island names', 'download'],
   },
 
   // ---- Logging & Connectors ----------------------------------------------------
