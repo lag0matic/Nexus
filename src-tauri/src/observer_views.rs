@@ -69,10 +69,9 @@ fn text(value: &Value) -> String {
 fn cell(row: &Value, key: &str) -> String {
     if ["aosUnix", "losUnix", "whenUnix"].contains(&key) {
         return row[key]
-            .as_i64()
-            .filter(|&n| n > 0)
-            .and_then(|n| chrono::DateTime::from_timestamp(n, 0))
-            .map(|date| date.format("%Y-%m-%d %H:%MZ").to_string())
+            .as_u64()
+            .filter(|&n| n > 0 && n <= 8_640_000_000_000)
+            .map(tempo_core::logbook::query::fmt_utc)
             .unwrap_or_default();
     }
     text(&row[key])
