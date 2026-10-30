@@ -1,9 +1,17 @@
-import { useId, useRef, useState } from 'react'
+import { useId, useRef, useState, type KeyboardEvent } from 'react'
 import { Check, Copy, MonitorSmartphone, Power, X } from 'lucide-react'
 import { observerPanelAction, type ObserverPanelStatus } from '../api'
 import { Dialog } from './ui/Dialog'
 import './browser-panel-share.css'
 import type { ObserverPanel } from '../observer/panels'
+
+function sharingKeys(event: KeyboardEvent<HTMLElement>) {
+  if (event.key === 'Escape' || event.key === 'Tab') return
+  // Configuration keys are not PTT/macros. Never swallow keyup: a held Space
+  // must still release PTT if focus moved here. Escape retains the global stop.
+  if (/^F\d{1,2}$/.test(event.code) && !event.altKey && !event.ctrlKey && !event.metaKey) event.preventDefault()
+  event.stopPropagation()
+}
 
 export function BrowserPanelShare({ panel, label = 'Share this panel in a browser' }: { panel: ObserverPanel; label?: string }) {
   const [open, setOpen] = useState(false)
@@ -40,9 +48,11 @@ export function BrowserPanelShare({ panel, label = 'Share this panel in a browse
   const link = status?.links[panel]
   return <>
     <button ref={opener} type="button" className="browser-share-trigger" title={label} aria-label={label}
+      onKeyDown={sharingKeys}
       onClick={() => { setOpen(true); setCopied(false); void refresh() }}><MonitorSmartphone size={17} aria-hidden="true" /></button>
     <Dialog open={open} onOpenChange={setOpen} title="Browser panels" description="Private LAN · HTTP"
       onCloseAutoFocus={(e) => { e.preventDefault(); opener.current?.focus({ preventScroll: true }) }}>
+      <div onKeyDown={sharingKeys}>
       <div className="browser-share-fields">
         <label htmlFor={`${id}-ip`}>Laptop address<input id={`${id}-ip`} value={address} disabled={busy || status?.running}
           onChange={(e) => setAddress(e.target.value)} spellCheck={false} /></label>
@@ -64,6 +74,7 @@ export function BrowserPanelShare({ panel, label = 'Share this panel in a browse
         <button type="button" disabled={busy || !status || !address || !Number.isInteger(port) || port < 1024 || port > 65535}
           onClick={() => void toggle()}><Power size={16} aria-hidden="true" /> {status?.running ? 'Stop sharing' : 'Start sharing'}</button>
         <button type="button" onClick={() => setOpen(false)}><X size={16} aria-hidden="true" /> Close</button>
+      </div>
       </div>
     </Dialog>
   </>

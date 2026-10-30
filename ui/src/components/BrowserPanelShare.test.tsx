@@ -3,11 +3,45 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BrowserPanelShare } from './BrowserPanelShare'
 import { observerPanelAction } from '../api'
+import { useEscStop } from '../useEscStop'
 
 vi.mock('../api', () => ({ observerPanelAction: vi.fn() }))
 afterEach(() => { cleanup(); delete window.__TAURI_INTERNALS__; vi.clearAllMocks() })
 
 describe('local browser sharing control', () => {
+  it('isolates configuration shortcuts but preserves PTT release and the global Escape stop', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true })
+    vi.mocked(observerPanelAction).mockResolvedValue({ running: false, address: '192.168.1.10', port: 7375, links: {} })
+    const down = vi.fn()
+    const up = vi.fn()
+    const stop = vi.fn()
+    function Scene() { useEscStop(true, stop); return <BrowserPanelShare panel="pota" /> }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    try {
+      render(<Scene />)
+      const trigger = screen.getByRole('button', { name: 'Share this panel in a browser' })
+      fireEvent.keyDown(trigger, { key: ' ', code: 'Space' })
+      expect(down).not.toHaveBeenCalled()
+      fireEvent.keyUp(trigger, { key: ' ', code: 'Space' })
+      expect(up).toHaveBeenCalledTimes(1)
+      fireEvent.click(trigger)
+      const start = await screen.findByRole('button', { name: 'Start sharing' })
+      fireEvent.keyDown(start, { key: ' ', code: 'Space' })
+      fireEvent.keyDown(start, { key: 'Enter', code: 'Enter' })
+      expect(fireEvent.keyDown(start, { key: 'F5', code: 'F5' })).toBe(false)
+      expect(down).not.toHaveBeenCalled()
+      fireEvent.keyUp(screen.getByLabelText('Laptop address'), { key: ' ', code: 'Space' })
+      expect(up).toHaveBeenCalledTimes(2)
+      fireEvent.keyDown(start, { key: 'Escape', code: 'Escape' })
+      expect(stop).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    } finally {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+    }
+  })
+
   it('is absent in a plain browser', () => {
     const { container } = render(<BrowserPanelShare panel="pota" />)
     expect(container.querySelector('button')).toBeNull()
