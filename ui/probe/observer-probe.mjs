@@ -12,7 +12,7 @@ const access = 'a'.repeat(64)
 const posts = []
 const monitorPanels = ['spots', 'bandmapPhone', 'bandmapCw', 'memories', 'dxped', 'sats', 'activation', 'operate', 'operatemap', 'waterfall', 'sstvviewer', 'fieldday', 'contestlog', 'contestscreen', 'fdclub']
 function monitor(panel) {
-  const data = { panel, metrics: [['Status', 'Receiving']], groups: [{ title: 'Recent activity', columns: ['Call', 'MHz', 'Mode'], rows: [['W9XYZ', (14.08 + monitorPanels.indexOf(panel) * .001).toFixed(4), 'FT4']], total: 1 }], media: {} }
+  const data = { panel, metrics: [['Status', 'Receiving']], groups: [{ title: 'Recent activity', columns: ['Call', 'MHz', 'Mode'], rows: [['W9XYZ', (14.09 + monitorPanels.indexOf(panel) * .001).toFixed(4), 'FT4']], total: 1 }], media: {} }
   if (panel === 'waterfall') { data.groups = []; data.media = { spectrum: Array.from({ length: 512 }, (_, i) => (Math.sin(i / 7) + 1) / 2), loHz: 0, hiHz: 4000 } }
   if (panel === 'sstvviewer') data.media = { rgb: Buffer.alloc(16 * 16 * 3, 120).toString('base64'), width: 16, height: 16 }
   if (panel === 'operatemap') data.media = { myGrid: 'EN37', stations: [{call: 'W9XYZ', grid: 'EM69', snr: -7, lastHeardSlot: 1, heardCount: 1, presence: 'active', worked: false}] }
