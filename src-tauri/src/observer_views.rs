@@ -437,7 +437,9 @@ mod tests {
             crate::b64_encode(b"BMtest")
         );
         assert!(last_picture(&source(&other), &gallery).is_none());
-        std::fs::write(&picture, vec![b'B'; 4_194_306]).unwrap();
+        let mut oversized = vec![b'B'; 4_194_306];
+        oversized[1] = b'M';
+        std::fs::write(&picture, oversized).unwrap();
         assert!(last_picture(&source(&picture), &gallery).is_none());
         std::fs::remove_dir_all(root).unwrap();
     }
