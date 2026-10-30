@@ -15,6 +15,16 @@ export async function observerState(): Promise<ObserverRadio> {
   return request('/observer/read/state')
 }
 
+export type MonitorData = {
+  panel: string
+  metrics: [string, string][]
+  groups: { title: string; columns: string[]; rows: string[][]; total: number }[]
+  media: { spectrum?: number[]; loHz?: number; hiHz?: number; rgb?: string; width?: number; height?: number; bmp?: string; stations?: import('../types').Station[]; myGrid?: string }
+}
+export function observerPanelData(panel: import('./panels').ObserverPanel): Promise<MonitorData> {
+  return request(`/observer/read/observer_panel_data?args=${encodeURIComponent(JSON.stringify({ panel }))}`)
+}
+
 export async function pairBrowser(entered: string): Promise<void> {
   const code = entered.replace(/\s/g, '')
   if (!/^\d{8}$/.test(code)) throw new Error('Enter the eight-digit code shown in Nexus')

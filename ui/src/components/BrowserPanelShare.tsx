@@ -3,8 +3,9 @@ import { Check, Copy, MonitorSmartphone, Power, X } from 'lucide-react'
 import { observerPanelAction, type ObserverPanelStatus } from '../api'
 import { Dialog } from './ui/Dialog'
 import './browser-panel-share.css'
+import type { ObserverPanel } from '../observer/panels'
 
-export function BrowserPanelShare({ panel }: { panel: 'pota' | 'conditions' | 'needed' }) {
+export function BrowserPanelShare({ panel, label = 'Share this panel in a browser' }: { panel: ObserverPanel; label?: string }) {
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<ObserverPanelStatus | null>(null)
   const [address, setAddress] = useState('')
@@ -38,7 +39,7 @@ export function BrowserPanelShare({ panel }: { panel: 'pota' | 'conditions' | 'n
   }
   const link = status?.links[panel]
   return <>
-    <button ref={opener} type="button" className="browser-share-trigger" title="Share this panel in a browser" aria-label="Share this panel in a browser"
+    <button ref={opener} type="button" className="browser-share-trigger" title={label} aria-label={label}
       onClick={() => { setOpen(true); setCopied(false); void refresh() }}><MonitorSmartphone size={17} aria-hidden="true" /></button>
     <Dialog open={open} onOpenChange={setOpen} title="Browser panels" description="Private LAN · HTTP"
       onCloseAutoFocus={(e) => { e.preventDefault(); opener.current?.focus({ preventScroll: true }) }}>

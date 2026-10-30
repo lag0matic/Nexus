@@ -107,6 +107,7 @@ mod log_tools;
 mod longwave_log;
 /// Locally approved Longwave HTTPS certificates, scoped to an exact server origin.
 mod longwave_trust;
+mod observer_views;
 mod observer_web;
 use longwave_log::{longwave_push_qso, longwave_sync_logbook};
 /// Parsec presence mode's watcher thread: stop latched transmissions when the operator's Parsec
@@ -34063,6 +34064,51 @@ fn observer_read(cmd: &str, args: &str) -> Result<serde_json::Value, String> {
     }
     tauri::async_runtime::block_on(async {
         match cmd {
+            "observer_panel_data" => {
+                let requested = observer_views::requested_panel(&args.to_string())?;
+                let panel = requested.as_str();
+                let mut source = match panel {
+                    "spots" | "bandmapPhone" | "bandmapCw" => {
+                        serde_json::to_value(get_all_spots(app.state(), app.state()))
+                    }
+                    "sats" => serde_json::to_value(get_satellites(app.state()).await?),
+                    "dxped" => serde_json::to_value(
+                        get_dxped_windows(app.state(), app.state(), Some(7)).await?,
+                    ),
+                    "waterfall" => {
+                        serde_json::to_value(get_spectrum_row(app.state(), app.state())?)
+                    }
+                    "memories" => {
+                        // Only this bank, never the rest of the durable UI state.
+                        let store = ui_state_read(&ui_state_path(), true)?;
+                        Ok(store
+                            .get("nexus.memory.bank.v2")
+                            .and_then(|s| serde_json::from_str(s).ok())
+                            .unwrap_or(serde_json::Value::Null))
+                    }
+                    _ => {
+                        let state = app.state::<SharedEngine>();
+                        let eng = tempo_app::engine::engine_try_lock(&state)
+                            .map_err(|_| "The laptop is busy")?;
+                        if panel == "sstvviewer" {
+                            let dto = sstv_state_dto(&eng);
+                            drop(eng);
+                            serde_json::to_value(dto)
+                        } else {
+                            let snapshot = eng.snapshot();
+                            drop(eng);
+                            serde_json::to_value(snapshot)
+                        }
+                    }
+                }
+                .map_err(|e| e.to_string())?;
+                if panel == "sstvviewer" && source["previewRgbBase64"].is_null() {
+                    if let Some(bmp) = observer_views::last_picture(&source, &sstv_gallery_dir()) {
+                        source["observerBmp"] = serde_json::Value::String(bmp);
+                    }
+                }
+                observer_views::project(panel, &source)
+            }
             "get_ota_spots" => {
                 let program = args
                     .get("program")

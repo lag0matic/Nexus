@@ -11,6 +11,7 @@
 import { useEffect, useId, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { TunerToggle } from './TunerToggle'
+import { BrowserPanelShare } from './BrowserPanelShare'
 import type { BandChannel, LinkState, RadioStatus, RadioSummary, Tier } from '../types'
 import { isOnAir, isRxOnly } from '../types'
 import { Menu } from './ui/Menu'
@@ -427,6 +428,7 @@ export function TopBar({
   )
   const chipCluster = (
     <div className="topbar-group topbar-chips">
+        <BrowserPanelShare panel="pota" label="Browser panels" />
         {/* Help lives in the one group that renders in every section — the
             cockpits hide the TX cluster, the readout and the digital chrome,
             but never this one, so the guide is one click away everywhere. */}

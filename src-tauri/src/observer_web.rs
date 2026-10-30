@@ -25,7 +25,13 @@ const PORT: u16 = 7375;
 const MAX_HEAD: usize = 8192;
 const MAX_BODY: usize = 512;
 const DEADLINE: Duration = Duration::from_secs(8);
-const READS: &[&str] = &["state", "get_ota_spots", "get_need_alerts", "get_band_plan"];
+const READS: &[&str] = &[
+    "state",
+    "get_ota_spots",
+    "get_need_alerts",
+    "get_band_plan",
+    "observer_panel_data",
+];
 type ReadCell = Arc<Mutex<Option<(Instant, Value)>>>;
 type ReceiveSelection = Arc<dyn Fn(&Listen) -> Result<(), String> + Send + Sync>;
 
@@ -78,7 +84,7 @@ fn hub() -> &'static tokio::sync::Mutex<Option<Arc<Session>>> {
 fn status(session: Option<&Session>) -> Status {
     let mut links = HashMap::new();
     if let Some(s) = session {
-        for panel in ["pota", "conditions", "needed"] {
+        for &panel in crate::observer_views::PANELS {
             links.insert(panel, s.base.clone());
         }
     }
@@ -221,11 +227,11 @@ fn pair(s: &Session, request: Pair) -> Result<Value, String> {
     if attempts.1 >= 5 {
         return Err("Too many attempts; wait 30 seconds and try again".into());
     }
-    attempts.1 += 1;
     if request.code.len() != 8
         || !request.code.bytes().all(|b| b.is_ascii_digit())
         || hmac::verify(&s.auth_key, request.code.as_bytes(), s.code_tag.as_ref()).is_err()
     {
+        attempts.1 += 1;
         return Err("Incorrect access code; check Nexus on the laptop".into());
     }
     Ok(json!({ "access": s.access }))
@@ -286,7 +292,10 @@ async fn serve(mut stream: TcpStream, s: Arc<Session>) -> Result<(), String> {
         tauri::Url::parse(&format!("{}{}", s.base, head.target)).map_err(|_| "Invalid path")?;
     let path = url.path();
     let reply: Result<(String, Vec<u8>), String> = if head.method == "GET"
-        && (path == "/" || ["/panels/pota", "/panels/conditions", "/panels/needed"].contains(&path))
+        && (path == "/"
+            || path
+                .strip_prefix("/panels/")
+                .is_some_and(|p| crate::observer_views::PANELS.contains(&p)))
     {
         crate::tv_asset("observer.html")
             .map(|(html, mime)| {
@@ -501,7 +510,11 @@ fn cached_read(s: &Session, cmd: &str, args: &str) -> Result<Value, String> {
             "catOk": radio.cat_ok, "busy": radio.rig_keyed || e.tx_owner().is_some(), "observedAt": now_ms() }),
         );
     }
-    let key = format!("{cmd}:{args}");
+    let key = if cmd == "observer_panel_data" {
+        format!("{cmd}:{}", crate::observer_views::requested_panel(args)?)
+    } else {
+        format!("{cmd}:{args}")
+    };
     let cell = {
         let mut cache = s.cache.lock().map_err(|_| "Panel cache unavailable")?;
         if cache.len() >= 64 && !cache.contains_key(&key) {
@@ -509,9 +522,16 @@ fn cached_read(s: &Session, cmd: &str, args: &str) -> Result<Value, String> {
         }
         cache.entry(key).or_default().clone()
     };
-    let mut entry = cell.lock().map_err(|_| "Panel cache unavailable")?;
+    let mut entry = cell
+        .try_lock()
+        .map_err(|_| "Panel refresh already in progress; try again")?;
     if let Some((at, value)) = &*entry {
-        if at.elapsed() < Duration::from_secs(30) {
+        let ttl = if cmd == "observer_panel_data" {
+            Duration::from_millis(500)
+        } else {
+            Duration::from_secs(30)
+        };
+        if at.elapsed() < ttl {
             return Ok(value.clone());
         }
     }
@@ -548,6 +568,47 @@ mod tests {
             work: Arc::new(tokio::sync::Semaphore::new(16)),
             tune: Arc::new(apply_listen),
         })
+    }
+
+    #[test]
+    fn observer_duplicate_refreshes_never_block_workers_or_create_extra_cache_entries() {
+        let session = test_session();
+        let cell: ReadCell = Arc::default();
+        session
+            .cache
+            .lock()
+            .unwrap()
+            .insert("observer_panel_data:memories".into(), cell.clone());
+        let held = cell.lock().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            tx.send(cached_read(
+                &session,
+                "observer_panel_data",
+                "{ \"panel\" : \"memories\" }",
+            ))
+            .unwrap();
+            assert_eq!(session.cache.lock().unwrap().len(), 1);
+        });
+        let result = rx.recv_timeout(Duration::from_secs(1));
+        drop(held);
+        worker.join().unwrap();
+        assert!(result.unwrap().unwrap_err().contains("already in progress"));
+    }
+
+    #[test]
+    fn observer_correct_pairing_can_open_many_panels_without_spending_guess_attempts() {
+        let session = test_session();
+        for _ in 0..20 {
+            assert!(pair(
+                &session,
+                Pair {
+                    code: "12345678".into()
+                }
+            )
+            .is_ok());
+        }
+        assert_eq!(session.pair_attempts.lock().unwrap().1, 0);
     }
 
     async fn talk(s: Arc<Session>, request: &str) -> String {

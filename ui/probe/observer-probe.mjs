@@ -10,6 +10,14 @@ const dist = resolve(ui, 'dist')
 const fixture = JSON.parse(await readFile(join(ui, 'src/remote-web/__fixtures__/navigation-connect.json'), 'utf8'))
 const access = 'a'.repeat(64)
 const posts = []
+const monitorPanels = ['spots', 'bandmapPhone', 'bandmapCw', 'memories', 'dxped', 'sats', 'activation', 'operate', 'operatemap', 'waterfall', 'sstvviewer', 'fieldday', 'contestlog', 'contestscreen', 'fdclub']
+function monitor(panel) {
+  const data = { panel, metrics: [['Status', 'Receiving']], groups: [{ title: 'Recent activity', columns: ['Call', 'MHz', 'Mode'], rows: [['W9XYZ', (14.08 + monitorPanels.indexOf(panel) * .001).toFixed(4), 'FT4']], total: 1 }], media: {} }
+  if (panel === 'waterfall') { data.groups = []; data.media = { spectrum: Array.from({ length: 512 }, (_, i) => (Math.sin(i / 7) + 1) / 2), loHz: 0, hiHz: 4000 } }
+  if (panel === 'sstvviewer') data.media = { rgb: Buffer.alloc(16 * 16 * 3, 120).toString('base64'), width: 16, height: 16 }
+  if (panel === 'operatemap') data.media = { myGrid: 'EN37', stations: [{call: 'W9XYZ', grid: 'EM69', snr: -7, lastHeardSlot: 1, heardCount: 1, presence: 'active', worked: false}] }
+  return data
+}
 let keyed = false
 let mhz = 14.074
 let tier = 'FT8'
@@ -36,6 +44,12 @@ const server = createServer(async (req, res) => {
         json({ accepted: true }); return
       }
       const command = url.pathname.split('/').at(-1)
+      if (command === 'observer_panel_data') {
+        const args = JSON.parse(url.searchParams.get('args'))
+        assert.deepEqual(Object.keys(args), ['panel'])
+        assert.ok(monitorPanels.includes(args.panel))
+        json(monitor(args.panel)); return
+      }
       const replies = {
         state: { radio: 2, mhz, band: '20m', mode: 'digital', tier, catOk: true, busy: keyed, observedAt: Date.now() },
         get_ota_spots: [{ activator: 'W9XYZ', reference: 'US-1234', name: 'A long park name for testing wrapping on narrow screens', freqKhz: 14074, mode: 'FT8' }],
@@ -87,7 +101,7 @@ try {
   await mkdir(output, { recursive: true })
   for (const [width,height] of [[375,812], [768,1024], [1024,768], [1920,1080]]) {
     await call('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:width<600 })
-    for (const panel of ['pota', 'needed', 'conditions']) {
+    for (const panel of ['pota', 'needed', 'conditions', ...monitorPanels]) {
       await call('Page.navigate', { url:`http://127.0.0.1:${server.address().port}${panel === 'pota' ? '/' : `/panels/${panel}`}` })
       await wait(`!!document.querySelector('#observer-code')`)
       const entry = await evaluate(`(() => {const e=document.querySelector('#observer-code');const r=e.getBoundingClientRect();return {right:r.right,width:r.width,scroll:document.documentElement.scrollWidth}})()`)
@@ -100,11 +114,17 @@ try {
       await evaluate(`document.querySelector('#observer-code').select()`)
       await call('Input.insertText', { text: '1234 5678' })
       await click('button[type=submit]')
-      if (panel !== 'conditions') {
+      if (panel === 'pota' || panel === 'needed') {
         await wait(`!!document.querySelector('.observer-spot:not(:disabled)')`)
         const layout = await evaluate(`(() => {const e=document.querySelector('.observer-spot');const r=e.getBoundingClientRect(); return {right:r.right,width:r.width,height:r.height,scroll:document.documentElement.scrollWidth,viewport:innerWidth};})()`)
         assert.ok(layout.right <= width + 1 && layout.width > 250 && layout.height >= 44 && layout.scroll <= width + 1, JSON.stringify(layout))
         const before = posts.length
+        if (panel === 'pota') {
+          await click('.observer-filters button[aria-pressed=false]')
+          assert.equal(posts.length, before, 'band filters must never tune')
+          await click('.observer-filters button:first-child')
+          await wait(`!!document.querySelector('.observer-spot:not(:disabled)')`)
+        }
         await click('.observer-spot')
         await wait(`document.querySelector('.observer-spot')?.getAttribute('aria-pressed')==='true'`)
         assert.equal(posts.length, before + 1)
@@ -114,10 +134,28 @@ try {
         await click('.observer-spot')
         assert.equal(posts.length, before + 1, 'keyed radio must not send another click')
         keyed = false
-      } else {
+      } else if (panel === 'conditions') {
         await wait(`!!document.querySelector('.connect-shell')`)
         await new Promise(r => setTimeout(r, 1000))
         assert.equal(await evaluate(`document.body.innerText.includes('Panel unavailable.')`), false)
+      } else {
+        await wait(`!!document.querySelector('.observer-monitor h1')`)
+        assert.equal(await evaluate(`document.querySelector('select[aria-label=Panel]').value`), panel)
+        assert.ok(await evaluate(`document.documentElement.scrollWidth <= innerWidth + 1`), `${panel}: page must fit the viewport`)
+        if (['waterfall', 'sstvviewer'].includes(panel)) {
+          await wait(`(() => { const c = document.querySelector('canvas'); return c && [...c.getContext('2d').getImageData(0,0,c.width,c.height).data].some((v,i)=>i%4!==3 && v>0) })()`)
+        }
+        if (panel === 'operatemap') await wait(`!!document.querySelector('.observer-map canvas')`)
+        if (['spots', 'memories', 'bandmapPhone', 'bandmapCw'].includes(panel)) {
+          const before = posts.length
+          await wait(`!!document.querySelector('.observer-monitor td button:not(:disabled)')`)
+          await click('.observer-monitor td button')
+          const expected = monitor(panel).groups[0].rows[0][1]
+          await wait(`document.querySelector('.observer-radio').textContent.includes(${JSON.stringify(expected)})`)
+          assert.equal(posts.length, before + 1)
+          assert.equal(posts.at(-1).mode, 'FT4', 'monitor clicks retain exact reported modes')
+        }
+        assert.equal(await evaluate(`!!document.querySelector('[data-action=ptt], [data-action=tx], [data-action=arm]')`), false)
       }
       assert.equal(await evaluate(`location.hash`), '', 'access removed from visible address')
       assert.equal(await evaluate(`Array.from(document.querySelectorAll('.observer-header a')).some(a=>a.href.includes('access='))`), false, 'panel addresses never include credentials')

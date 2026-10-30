@@ -1,11 +1,12 @@
 # Custom Longwave Linux Build
 
-Version: `1.21.0-longwave.9`.
-Branch: `codex/upstream-linux-20261029`.
+Version: `1.21.0-longwave.10`.
+Branch: `codex/lan-panel-library`.
 Upstream integrated: `a4df10bf967783dce386f69e60dc98ffb9b060aa`.
 
 This includes upstream's unreleased work, not a new official Nexus release.
-The previous custom branch, `codex/lan-observer-panels`, is unchanged.
+The previous custom branches, `codex/lan-observer-panels` and
+`codex/upstream-linux-20261029`, are unchanged.
 
 ## Retained Changes
 
@@ -13,9 +14,17 @@ The previous custom branch, `codex/lan-observer-panels`, is unchanged.
 - Desktop microphone routing with release-safe PTT.
 - IC-7300 PBT and manual notch controls. Tune switches the internal tuner
   inline/bypass; ATU starts its tuning cycle. Tune does not generate a carrier.
-- Receive-only LAN browser panels for POTA, Conditions and Needed, with a short
-  address and local eight-digit access code. Selection changes frequency/mode
-  without transmitting or arming a digital transmission.
+- Receive-only LAN browser views for all 18 native pop-out panel types, with a
+  short address and local eight-digit access code. The panel picker opens
+  independent routes; the external-link button opens another browser tab.
+  POTA has band and exact-mode filter buttons. A manual refresh preserves the
+  current access and filters. Listen changes frequency/mode without transmitting
+  or arming a digital transmission.
+- Extra browser views are purpose-built monitors, not copies of native transmit
+  cockpits: spots and receive memories support listen; contest/activation/club
+  screens show bounded status tables; the station map, audio waterfall and SSTV
+  preview/latest picture are view-only. No log editing, arming, PTT, ATU or
+  Doppler/automatic tuning is available through these browser panels.
 - Stock updater prompts and downloads remain disabled for custom builds.
 
 Longwave uploads and stamps are integrated into upstream's replacement Contact
@@ -52,5 +61,11 @@ data backup. The new build should retain saved Longwave settings and certificate
 approval; never work around a new TLS failure by disabling verification.
 
 Use LAN sharing only on a trusted private network, without port forwarding.
+
+If the desktop microphone keys the IC-7300 but USB audio stops reaching it,
+check both the configured playback device and the rig's modulation input.
+On 2026-10-30, disconnecting and reconnecting the radio USB cable restored
+audio on the laptop without a software change. The microphone patch was not
+removed; the observed failure was cleared by re-enumerating the USB device.
 Browser access does not encrypt traffic. An intermittent Linux UI-freeze report
 from the previous build remains unconfirmed; this merge is not a claimed fix.
