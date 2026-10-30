@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Crosshair } from 'lucide-react'
 import { listenMode, type MonitorData } from './client'
 import { observerPanel, OBSERVER_PANELS } from './panels'
@@ -52,13 +52,14 @@ export function MonitorPanel({ data, query, disabled, onListen }: {
   data: MonitorData; query: string; disabled: boolean
   onListen: (row: { call: string; mhz: number; mode: string }) => void
 }) {
+  const [mapCall, setMapCall] = useState<string | null>(null)
   return <div className="observer-monitor">
     <h1>{OBSERVER_PANELS.find(p => p.id === observerPanel(data.panel))?.label}</h1>
     {!!data.metrics.length && <dl className="observer-metrics">{data.metrics.map(([label, value]) =>
       <div key={label}><dt>{label}</dt><dd>{value || 'Not active'}</dd></div>)}</dl>}
     <MonitorMedia media={data.media} />
     {data.media.stations && <div className="observer-map"><MapView myGrid={data.media.myGrid ?? ''} theme="dark"
-      stations={data.media.stations} prop={null} selectedCall={null} onSelectCall={() => {}}
+      stations={data.media.stations} prop={null} selectedCall={mapCall} onSelectCall={setMapCall}
       needByCall={new Map()} /></div>}
     {data.groups.map(group => {
       const frequency = group.columns.indexOf('MHz')
