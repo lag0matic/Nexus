@@ -211,14 +211,11 @@ impl Engine {
         if let Some(hold) = self.remote_ptt_hold.clone() {
             let may_key = self.remote_presence_live(now)
                 && self.settings.operating_mode == OperatingMode::Phone;
-            let armed = self.mic_armed() && self.desktop_mic.is_none();
+            let armed = self.mic_armed();
             hold.tick(now, may_key, armed, |on| {
                 if on {
                     self.arm_remote_mic(now)
                 } else {
-                    if self.desktop_mic.is_some() {
-                        return false;
-                    }
                     // The press ended (released, or its holds stopped arriving), or it is no
                     // longer admitted here (presence, Phone).
                     self.drop_mic_latch_for(if may_key {

@@ -802,9 +802,6 @@ const TRANSMITS_BY_ITSELF: &[Change] = &[
         s.js8_api_udp_accept = !s.js8_api_udp_accept
     }),
     ("remote_stream", |s| s.remote_stream = !s.remote_stream),
-    ("phone_desktop_mic", |s| {
-        s.phone_desktop_mic = !s.phone_desktop_mic
-    }),
 ];
 
 /// ⛔ The guards on a transmission: what stops or caps one by itself, the licence privileges, and

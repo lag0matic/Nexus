@@ -2876,9 +2876,6 @@ pub struct Settings {
     /// A configured device that fails to open falls back to the shared input.
     #[serde(default)]
     pub voice_mic_device: String,
-    /// Local Phone PTT carries the explicitly selected desktop microphone. Off for old files.
-    #[serde(default)]
-    pub phone_desktop_mic: bool,
     /// Tx audio level (0.0–1.0) applied to outgoing samples before they reach
     /// the sound card.
     pub tx_level: f32,
@@ -6360,7 +6357,6 @@ impl Default for Settings {
             audio_in: String::new(),
             audio_out: String::new(),
             voice_mic_device: String::new(),
-            phone_desktop_mic: false,
             tx_level: 0.9,
             rx_gain: 1.0,
             monitor_enabled: false,

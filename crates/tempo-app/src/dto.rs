@@ -2025,8 +2025,6 @@ pub struct RadioStatus {
     /// rise, so its message never reads as ended and a hide stops it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub voice_playing: bool,
-    #[serde(default)]
-    pub phone_desktop_mic: bool,
     /// Whether the transmit watchdog has tripped (continuous-TX limit reached)
     /// and auto-halted transmit. Cleared by re-enabling TX.
     #[serde(default)]

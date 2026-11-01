@@ -39,7 +39,6 @@ export interface Profile {
 const NEVER_IMPORT: readonly string[] = [
   'mycall',
   'licenseClass',
-  'phoneDesktopMic',
   'radios',
   'activeRadio',
   'qrzLastSyncUnix',

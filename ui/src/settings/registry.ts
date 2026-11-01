@@ -357,7 +357,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     tab: 'phone',
     neededInHourOne: true,
     keywords: ['ssb', 'usb', 'lsb', 'voice', 'fm', 'repeater', 'shift', 'offset', 'ctcss',
-      'pl tone', 'tone', 'mic', 'microphone', 'voice keyer', 'desktop microphone', 'live voice source'],
+      'pl tone', 'tone', 'mic', 'microphone', 'voice keyer'],
   },
   {
     id: 'cw',

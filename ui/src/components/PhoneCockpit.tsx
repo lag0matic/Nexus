@@ -1091,7 +1091,6 @@ export function PhoneCockpit({ esmSetting, flexDaxNote, onResumeContest, active 
   // and Stop on either road. Client mode ends it at its cap (`tempo_client::phone_lock`) unless the
   // operator answers "Still talking?", asked here shortly before; the answer rides the next hold.
   const driving = drivesAnotherStation()
-  const desktopMic = !driving && !!snap.radio.phoneDesktopMic
   const holding = useRef<ReturnType<typeof setInterval> | null>(null)
   const [pressEnded, setPressEnded] = useState(false)
   const [stillAsk, setStillAsk] = useState<number | null>(null)
@@ -1210,20 +1209,7 @@ export function PhoneCockpit({ esmSetting, flexDaxNote, onResumeContest, active 
       return
     }
     setKeyed(on)
-    void setPtt(on).then((s) => {
-      onSnap?.(s)
-      if (on && desktopMic && !s.radio.streamMic) {
-        setKeyed(false)
-        pushToast(t('phone.tx.desktopRefused'), 'error')
-      }
-    }).catch(() => {
-      setKeyed(false)
-      if (on && desktopMic) {
-        // The arm may have arrived even if its reply did not. Explicitly release it.
-        void setPtt(false).catch(() => {})
-        pushToast(t('phone.tx.desktopRefused'), 'error')
-      }
-    })
+    void setPtt(on)
     // A release from either side lets go of both: the shack's key and the streamed over.
     if (!on) releaseMic()
   }
@@ -1249,14 +1235,10 @@ export function PhoneCockpit({ esmSetting, flexDaxNote, onResumeContest, active 
   const [micReported, setMicReported] = useState(false)
   useEffect(() => {
     if (!keyed) setMicReported(false)
-    else if ((micArmed.current || driving || desktopMic) && streamMic !== null) setMicReported(true)
-    else if (desktopMic && micReported && streamMic === null) {
-      setKeyed(false)
-      pushToast(t('phone.tx.desktopStopped'), 'info')
-    }
-  }, [keyed, streamMic, driving, desktopMic, micReported, t])
+    else if ((micArmed.current || driving) && streamMic !== null) setMicReported(true)
+  }, [keyed, streamMic, driving])
   const pttArmed =
-    keyed && snap.radio.txAllowed && snap.radio.txEnabled && (micArmed.current || driving || desktopMic) &&
+    keyed && snap.radio.txAllowed && snap.radio.txEnabled && (micArmed.current || driving) &&
     !pressEnded && (streamMic === 'armed' || (streamMic === null && !micReported))
   // A refused level goes back to what the rig reports: the read-back above moves the slider only
   // when the rig's value changes, and a refusal changes nothing.
@@ -3367,9 +3349,7 @@ export function PhoneCockpit({ esmSetting, flexDaxNote, onResumeContest, active 
                   : 'TX locked — outside your license privileges (pick a band, or change your license in Settings)')
               : !snap.radio.txEnabled
                 ? "Transmit is switched OFF, so keying is discarded — Stop TX, the TX watchdog or a logger's Halt Tx turns it off. Click to enable transmit, then hold to talk. You talk on the rig's mic."
-                : desktopMic
-                  ? t('phone.tx.desktopHint')
-                  : "Hold to talk (or Space). Toggle 'Lock' for hands-free (then Enter keys/unkeys). You talk on the rig's mic."
+                : "Hold to talk (or Space). Toggle 'Lock' for hands-free (then Enter keys/unkeys). You talk on the rig's mic."
           }
         >
           {!snap.radio.txAllowed

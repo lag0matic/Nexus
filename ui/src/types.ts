@@ -1637,7 +1637,6 @@ export interface RadioStatus {
    * sign waits while it says `armed`, which the station says only while that over owns the
    * transmitter. */
   streamMic?: 'armed' | 'keyed' | null
-  phoneDesktopMic?: boolean
   /** True if the TX watchdog has auto-halted transmit (needs a re-enable). */
   txWatchdog: boolean
   /** The radio did not accept the key for a slot over (FT8, FT4, JS8 …), so it was not sent and
@@ -5161,7 +5160,6 @@ export interface Settings {
    * recording opens a separate input on it; a device that fails to open falls back to
    * the shared input. The decode path is never affected. */
   voiceMicDevice?: string
-  phoneDesktopMic?: boolean
   /** Transmit drive level, 0–1 (default 0.9). */
   txLevel: number
   /** RX capture gain, ≥1.0 multiplier on received audio before decode (default 1.0). */

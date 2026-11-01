@@ -228,7 +228,6 @@ pub(crate) fn keep_the_shacks_transmit_settings(
     save.tci_server_spots = shack.tci_server_spots;
     // What lets a browser drive the station's own window, its transmit keys included.
     save.remote_stream = shack.remote_stream;
-    save.phone_desktop_mic = shack.phone_desktop_mic;
     // What stops or caps a transmission by itself.
     save.tx_watchdog_min = shack.tx_watchdog_min;
     save.js8_idle_watchdog_min = shack.js8_idle_watchdog_min;
@@ -456,7 +455,7 @@ pub(crate) fn keep_the_shacks_settings(
 /// ([`keep_the_shacks_transmit_settings`]), then the addresses the shack sends a stored key or
 /// password to ([`keep_the_shacks_credential_addresses`]). A test changes each setting alone in a save from
 /// afar and holds this list to exactly the ones that come back.
-pub(crate) const STATION_ONLY_SETTINGS: [&str; 59] = [
+pub(crate) const STATION_ONLY_SETTINGS: [&str; 58] = [
     "js8AprsRelay",
     "beaconTxPercent",
     "cqPauseSecs",
@@ -474,7 +473,6 @@ pub(crate) const STATION_ONLY_SETTINGS: [&str; 59] = [
     "tciServerCw",
     "tciServerSpots",
     "remoteStream",
-    "phoneDesktopMic",
     "txWatchdogMin",
     "js8IdleWatchdogMin",
     "tuneTimeoutSecs",

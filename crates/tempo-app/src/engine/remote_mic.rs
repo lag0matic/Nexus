@@ -64,7 +64,7 @@ impl Engine {
     /// nothing else holding the transmitter.
     pub fn arm_remote_mic(&mut self, now: Instant) -> bool {
         if self.mic.active() {
-            return self.desktop_mic.is_none();
+            return true;
         }
         let Some(feed) = self.mic_feed.clone() else {
             return false;
@@ -150,9 +150,7 @@ impl Engine {
     /// The Phone cockpit let go of a press it armed through the stream's picture: the over ends,
     /// as the page's own PTT's does when it is let go.
     pub fn release_remote_mic(&mut self) {
-        if self.desktop_mic.is_none() {
-            self.drop_mic_latch_for(MicEnded::Released);
-        }
+        self.drop_mic_latch_for(MicEnded::Released);
     }
 
     /// Whether a microphone over is armed or keyed.
@@ -170,10 +168,7 @@ impl Engine {
     /// because an armed over has put nothing on the air and a one-shot abort armed for nothing
     /// would cut an unrelated over riding the same PTT.
     pub fn drop_mic_latch(&mut self) {
-        let local = self.desktop_mic.take();
-        if let Some(local) = &local {
-            local.feed.close();
-        } else if let Some(feed) = &self.mic_feed {
+        if let Some(feed) = &self.mic_feed {
             feed.close();
         }
         self.mic_presence = None;
@@ -184,9 +179,7 @@ impl Engine {
         }
         if was_active {
             self.mic_ended = Some(why);
-            if local.is_none() {
-                self.publish_mic_status();
-            }
+            self.publish_mic_status();
         }
     }
 
@@ -199,9 +192,6 @@ impl Engine {
     /// The over as the page is shown it (`micState`), published to the stream's feed: by every
     /// tick of a live over ([`Self::poll_mic`]), and by its end, after which no tick runs.
     fn publish_mic_status(&self) {
-        if self.desktop_mic.is_some() {
-            return;
-        }
         if let Some(feed) = &self.mic_feed {
             let (holes, hole_ms) = self.mic.holes();
             feed.publish(MicStatus {
@@ -256,16 +246,11 @@ impl Engine {
         if !self.mic.active() {
             return MicTick::Idle;
         }
-        let desktop = self.desktop_mic.is_some();
         // G5: presence is live, and it is the session this over armed under. A new session (the
         // page reconnected) is not this over's: it must be pressed again.
-        let presence = if desktop {
-            self.desktop_mic_current(now)
-        } else {
-            match (&self.remote_presence, &self.mic_presence) {
-                (Some(live), Some(armed)) => live.valid(now) && live.same_session(armed),
-                _ => false,
-            }
+        let presence = match (&self.remote_presence, &self.mic_presence) {
+            (Some(live), Some(armed)) => live.valid(now) && live.same_session(armed),
+            _ => false,
         };
         let gates = MicGates {
             tx_enabled: self.tx_enabled,
@@ -281,10 +266,8 @@ impl Engine {
             watchdog_start_secs: self.tx_watchdog_start,
         };
         let arrived = self
-            .desktop_mic
+            .mic_feed
             .as_ref()
-            .map(|mic| &mic.feed)
-            .or(self.mic_feed.as_ref())
             .map(MicFeed::take)
             .unwrap_or_default();
         let budget_ms = budget_ms.clamp(0.0, MIC.max_push_ms as f64);
@@ -314,11 +297,7 @@ impl Engine {
                 "tx",
                 &format!(
                     "{} over ended: {}",
-                    if desktop {
-                        "Desktop microphone"
-                    } else {
-                        MIC.name
-                    },
+                    MIC.name,
                     match why {
                         MicDrop::GateDown => "a transmit gate went down",
                         MicDrop::Presence => "the stream's transmit presence lapsed",
@@ -331,9 +310,7 @@ impl Engine {
                 ),
             );
         }
-        if !desktop {
-            self.publish_mic_status();
-        }
+        self.publish_mic_status();
         res.tick
     }
 }

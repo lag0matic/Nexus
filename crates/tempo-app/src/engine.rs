@@ -106,7 +106,6 @@ mod cw_unassisted_tests;
 /// A CW message the radio's own keyer would not take is refused whole, before anything keys.
 #[cfg(test)]
 mod cw_whole_message_tests;
-mod desktop_mic;
 mod field_day_display;
 /// WSJT-X's mid-over message switch for FT8 and FT4 (`m_restart`).
 /// When an FT8/FT4 contact is logged by itself, offered in the confirm popup, or left for Log QSO.
@@ -4088,7 +4087,6 @@ pub struct Engine {
     /// The streamed operator's microphone over, and what it needs: see `engine/remote_mic.rs`.
     mic: crate::mic::MicLatch,
     mic_feed: Option<crate::mic::MicFeed>,
-    desktop_mic: Option<desktop_mic::DesktopMic>,
     /// The presence permit the over armed under: G5 is "presence, for THIS over".
     mic_presence: Option<crate::remote_control::transmit::TransmitPermit>,
     /// One-shot microphone abort: the loop flushes the output ring + unkeys, then clears it.
@@ -6945,7 +6943,6 @@ impl Engine {
             remote_tx_hold_shown: None,
             mic: crate::mic::MicLatch::default(),
             mic_feed: None,
-            desktop_mic: None,
             mic_presence: None,
             mic_abort: false,
             mic_end: None,
@@ -7372,11 +7369,6 @@ impl Engine {
     }
 
     fn apply_settings_inner(&mut self, s: Settings, keep_live_roster: bool) {
-        if s.phone_desktop_mic != self.settings.phone_desktop_mic
-            || s.voice_mic_device != self.settings.voice_mic_device
-        {
-            self.set_ptt(false);
-        }
         self.remote_readings.invalidate();
         // The address the club link line is about, before the save: a save that moves it
         // starts the line afresh at the end of this function.
@@ -12492,13 +12484,6 @@ impl Engine {
     /// Manually key (true) / unkey (false) the rig for live phone. Gated by Monitor:
     /// a key request is ignored while TX is disabled. The radio loop applies it.
     pub fn set_ptt(&mut self, on: bool) {
-        if !on && self.desktop_mic.is_some() {
-            self.drop_mic_latch_for(crate::mic::MicEnded::Released);
-        }
-        if on && (self.settings.phone_desktop_mic || self.desktop_mic.is_some()) {
-            self.arm_desktop_mic(std::time::Instant::now());
-            return;
-        }
         // A clock repair holds transmit: a new key is refused, and one already held is never
         // dropped by it ([`Self::hold_tx_for_clock_repair`]).
         if on && !self.manual_ptt && self.clock_repair_holds_tx() {
@@ -29396,7 +29381,6 @@ contact yourself."
         // What the Phone cockpit's PTT and the header's ON AIR sign show of a streamed microphone
         // over; display only. `Armed` only while that over owns the transmitter: anything the
         // arbiter names before it (an FT over, the tune carrier, a key at the shack) is on the air.
-        s.radio.phone_desktop_mic = self.settings.phone_desktop_mic;
         s.radio.stream_mic = if self.mic.keyed() {
             Some(crate::dto::StreamMic::Keyed)
         } else if self.mic.active() && self.tx_owner() == Some(TxOwner::Mic) {

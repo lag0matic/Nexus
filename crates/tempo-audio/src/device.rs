@@ -36,6 +36,7 @@ use crate::audiodev::{split_device_ordinal, AudioDevice};
 use crate::backend::AudioBackend;
 use crate::capture_resample::CaptureResampler;
 use crate::monitor::{Monitor, SpscRing};
+use crate::resample::resample_linear;
 
 const MODEM_RATE: u32 = 12_000;
 
@@ -1302,7 +1303,7 @@ const NO_TX_ROUTE: &str = "no sound card is open for transmit audio";
 pub(crate) struct CaptureStream {
     _stream: Stream,
     ring: Arc<Mutex<VecDeque<f32>>>,
-    resampler: CaptureResampler,
+    rate: u32,
     /// The device name this stream targets, so a re-`set_voice_mic` on the SAME device
     /// is a no-op (only a different device rebuilds the stream).
     device: String,
@@ -1570,18 +1571,19 @@ impl CaptureStream {
         Ok(Self {
             _stream: stream,
             ring,
-            resampler: CaptureResampler::new(rate, MODEM_RATE),
+            rate,
             device: name.to_string(),
         })
     }
 
-    /// Keep filter history and fractional phase across live microphone blocks.
-    pub(crate) fn drain(&mut self) -> Vec<f32> {
+    /// Drain the ring and resample the device's native rate to 12 kHz. Body moved
+    /// verbatim from `CpalBackend::voice_capture`, which now delegates here.
+    pub(crate) fn drain(&self) -> Vec<f32> {
         let dev: Vec<f32> = {
             let mut ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
             ring.drain(..).collect()
         };
-        self.resampler.process(&dev)
+        resample_linear(&dev, self.rate, MODEM_RATE)
     }
 }
 
@@ -2414,7 +2416,7 @@ impl AudioBackend for CpalBackend {
     /// when no mic stream is open), resampled from the mic device's native rate.
     fn voice_capture(&mut self) -> Vec<f32> {
         self.voice_mic
-            .as_mut()
+            .as_ref()
             .map(CaptureStream::drain)
             .unwrap_or_default()
     }
