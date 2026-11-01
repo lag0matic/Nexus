@@ -9,6 +9,25 @@ vi.mock('../api', () => ({ observerPanelAction: vi.fn() }))
 afterEach(() => { cleanup(); delete window.__TAURI_INTERNALS__; vi.clearAllMocks() })
 
 describe('local browser sharing control', () => {
+  it('saves startup consent only on the local checkbox and confirms forgetting separately from Stop', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true })
+    const on = { running: true, persistent: true, automatic: false, address: '192.168.1.10', port: 7375, links: {} }
+    vi.mocked(observerPanelAction).mockResolvedValueOnce(on).mockResolvedValueOnce({ ...on, automatic: true })
+      .mockResolvedValueOnce({ ...on, running: false, persistent: false })
+    render(<BrowserPanelShare panel="pota" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Share this panel in a browser' }))
+    const checkbox = await screen.findByLabelText('Start browser sharing with Nexus')
+    await waitFor(() => expect(checkbox).toHaveProperty('disabled', false))
+    expect(checkbox).toHaveProperty('checked', false)
+    fireEvent.click(checkbox)
+    await waitFor(() => expect(checkbox).toHaveProperty('checked', true))
+    expect(observerPanelAction).toHaveBeenLastCalledWith({ kind: 'automatic', enabled: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Forget paired browsers' }))
+    expect(observerPanelAction).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm forget' }))
+    await waitFor(() => expect(observerPanelAction).toHaveBeenLastCalledWith({ kind: 'forget' }))
+    await waitFor(() => expect(checkbox).toHaveProperty('checked', false))
+  })
   it('isolates configuration shortcuts but preserves PTT release and the global Escape stop', async () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true })
     vi.mocked(observerPanelAction).mockResolvedValue({ running: false, address: '192.168.1.10', port: 7375, links: {} })

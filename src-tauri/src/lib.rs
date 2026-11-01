@@ -107,6 +107,7 @@ mod log_tools;
 mod longwave_log;
 /// Locally approved Longwave HTTPS certificates, scoped to an exact server origin.
 mod longwave_trust;
+mod observer_store;
 mod observer_views;
 mod observer_web;
 use longwave_log::{longwave_push_qso, longwave_sync_logbook};
@@ -42224,6 +42225,7 @@ fn build_app(d: BuildDeps) -> tauri::Result<tauri::App> {
             }
             // The TV page's asset + RPC closures read this at call time (see TV_APP).
             let _ = TV_APP.set(app.handle().clone());
+            observer_web::restore_at_startup();
             // The IOTA list tells the windows when a background download changes it.
             iota_list::set_app(app.handle().clone());
             // Probe the display's physical density HERE, on the main thread, where GDK is safe

@@ -25,7 +25,24 @@ export function observerPanelData(panel: import('./panels').ObserverPanel): Prom
   return request(`/observer/read/observer_panel_data?args=${encodeURIComponent(JSON.stringify({ panel }))}`)
 }
 
-export async function pairBrowser(entered: string): Promise<void> {
+const ACCESS_KEY = 'nexus.browser-panels.access'
+
+export function restoreBrowserAccess(): boolean {
+  if (window.__NEXUS_OBSERVER_ACCESS__) return true
+  try {
+    const access = localStorage.getItem(ACCESS_KEY) ?? sessionStorage.getItem(ACCESS_KEY)
+    if (access && /^[a-f0-9]{64}$/.test(access)) window.__NEXUS_OBSERVER_ACCESS__ = access
+  } catch { /* Storage-denied browsers can still pair for this page. */ }
+  return Boolean(window.__NEXUS_OBSERVER_ACCESS__)
+}
+
+export function forgetBrowserAccess() {
+  delete window.__NEXUS_OBSERVER_ACCESS__
+  try { localStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(ACCESS_KEY) } catch { /* Page memory is cleared regardless. */ }
+  window.dispatchEvent(new Event('observer-access-lost'))
+}
+
+export async function pairBrowser(entered: string, remember = true): Promise<void> {
   const code = entered.replace(/\s/g, '')
   if (!/^\d{8}$/.test(code)) throw new Error('Enter the eight-digit code shown in Nexus')
   const controller = new AbortController()
@@ -34,9 +51,16 @@ export async function pairBrowser(entered: string): Promise<void> {
     const response = await fetch('/observer/pair', { method: 'POST', signal: controller.signal,
       cache: 'no-store', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })
     if (!response.ok) throw new Error(await response.text())
-    const result = await response.json() as { access?: unknown }
+    const result = await response.json() as { access?: unknown; persistent?: boolean }
     if (typeof result.access !== 'string' || !/^[a-f0-9]{64}$/.test(result.access)) throw new Error('Invalid access response')
     window.__NEXUS_OBSERVER_ACCESS__ = result.access
+    try {
+      localStorage.removeItem(ACCESS_KEY); sessionStorage.removeItem(ACCESS_KEY)
+      // Session storage survives refresh. Durable storage is only useful when
+      // Nexus confirms its own pairing was saved in the OS credential store.
+      const storage = remember && result.persistent === true ? localStorage : sessionStorage
+      storage.setItem(ACCESS_KEY, result.access)
+    } catch { /* Pairing still works when browser storage is denied. */ }
   } finally { window.clearTimeout(timeout) }
 }
 
@@ -48,7 +72,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   try {
     const result = await fetch(url, { ...init, signal: controller.signal, cache: 'no-store', credentials: 'omit',
       headers: { Authorization: `Bearer ${access}`, ...(init?.headers ?? {}) } })
-    if (!result.ok) throw new Error(await result.text())
+    if (!result.ok) {
+      const message = await result.text()
+      if (result.status === 403 && message === 'Enter the current access code shown in Nexus' && window.__NEXUS_OBSERVER_ACCESS__ === access) forgetBrowserAccess()
+      throw new Error(message)
+    }
     return await result.json() as T
   } finally { window.clearTimeout(timeout) }
 }

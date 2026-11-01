@@ -1,7 +1,8 @@
 //! Opt-in second-monitor panels on one private IPv4 interface. Trusted-LAN HTTP,
-//! not Internet remote operation. A short local code exchanges for a tab-memory token for panel reads
+//! not Internet remote operation. A short local code exchanges for a browser token for panel reads
 //! and ONE receive-only operation. No arbitrary command dispatcher is exposed.
-//! Stopping sharing revokes every link and in-flight request; restart is always off.
+//! Stop ends all in-flight access, but keeps pairing. Forget removes pairing and
+//! startup consent. Automatic startup is opt-in and requires the OS credential vault.
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
@@ -44,6 +45,10 @@ pub(crate) enum Action {
         port: Option<u16>,
     },
     Stop,
+    Automatic {
+        enabled: bool,
+    },
+    Forget,
 }
 
 #[derive(Serialize)]
@@ -55,6 +60,9 @@ pub(crate) struct Status {
     /// Explicitly requested at the local screen only; never logged or persisted.
     links: HashMap<&'static str, String>,
     access_code: Option<String>,
+    automatic: bool,
+    persistent: bool,
+    storage_error: Option<String>,
 }
 
 struct Session {
@@ -73,9 +81,11 @@ struct Session {
     cache: Mutex<HashMap<String, ReadCell>>,
     work: Arc<tokio::sync::Semaphore>,
     tune: ReceiveSelection,
+    persistent: bool,
 }
 
 static SESSION: OnceLock<tokio::sync::Mutex<Option<Arc<Session>>>> = OnceLock::new();
+static MANUAL_ACTION: AtomicBool = AtomicBool::new(false);
 
 fn hub() -> &'static tokio::sync::Mutex<Option<Arc<Session>>> {
     SESSION.get_or_init(|| tokio::sync::Mutex::new(None))
@@ -97,6 +107,9 @@ fn status(session: Option<&Session>) -> Status {
         port: session.map_or(PORT, |s| s.port),
         links,
         access_code: session.map(|s| s.code.clone()),
+        automatic: false,
+        persistent: session.is_some_and(|s| s.persistent),
+        storage_error: None,
     }
 }
 
@@ -104,10 +117,40 @@ pub(crate) async fn action(
     origin: crate::remote_service::Origin,
     action: Action,
 ) -> Result<Status, String> {
+    action_impl(origin, action, false).await
+}
+
+async fn action_impl(
+    origin: crate::remote_service::Origin,
+    action: Action,
+    restoring: bool,
+) -> Result<Status, String> {
     if origin != crate::remote_service::Origin::Shack {
         return Err("Browser sharing can only be changed at the laptop".into());
     }
     let mut slot = hub().lock().await;
+    if restoring && MANUAL_ACTION.load(Ordering::SeqCst) {
+        return Ok(status(slot.as_deref()));
+    }
+    if !restoring && !matches!(action, Action::Status) {
+        MANUAL_ACTION.store(true, Ordering::SeqCst);
+    }
+    if matches!(action, Action::Stop | Action::Forget) {
+        // Pause before a potentially locked OS-vault call, not after it.
+        if let Some(s) = slot.take() {
+            let _click = s.last_click.lock().map_err(|_| "Sharing unavailable")?;
+            s.active.store(false, Ordering::SeqCst);
+            let _ = s.stop.send(true);
+        }
+    }
+    let stored = tokio::task::spawn_blocking(crate::observer_store::load)
+        .await
+        .map_err(|_| "Browser pairing storage unavailable")?;
+    let mut storage_error = stored.as_ref().err().cloned();
+    let mut saved = stored.ok().flatten();
+    if restoring && !saved.as_ref().is_some_and(|s| s.automatic) {
+        return Ok(status(slot.as_deref()));
+    }
     if slot
         .as_ref()
         .is_some_and(|s| !s.active.load(Ordering::SeqCst))
@@ -116,12 +159,26 @@ pub(crate) async fn action(
     }
     match action {
         Action::Status => {}
-        Action::Stop => {
-            if let Some(s) = slot.take() {
-                let _click = s.last_click.lock().map_err(|_| "Sharing unavailable")?;
-                s.active.store(false, Ordering::SeqCst);
-                let _ = s.stop.send(true);
+        Action::Stop | Action::Forget => {
+            if matches!(action, Action::Forget) {
+                tokio::task::spawn_blocking(crate::observer_store::clear)
+                    .await
+                    .map_err(|_| "Browser pairing storage unavailable")??;
+                saved = None;
+                storage_error = None;
             }
+        }
+        Action::Automatic { enabled } => {
+            let mut next = saved
+                .clone()
+                .ok_or("Start sharing with an unlocked OS credential store first")?;
+            next.automatic = enabled;
+            let write = next.clone();
+            tokio::task::spawn_blocking(move || crate::observer_store::save(&write))
+                .await
+                .map_err(|_| "Browser pairing storage unavailable")??;
+            saved = Some(next);
+            storage_error = None;
         }
         Action::Start { address, port } => {
             if slot.is_none() {
@@ -144,7 +201,35 @@ pub(crate) async fn action(
                 SystemRandom::new()
                     .fill(&mut secret)
                     .map_err(|_| "Cannot make an access link")?;
-                let access: String = secret.iter().map(|b| format!("{b:02x}")).collect();
+                let access = saved
+                    .as_ref()
+                    .map(|s| s.access.clone())
+                    .unwrap_or_else(|| secret.iter().map(|b| format!("{b:02x}")).collect());
+                let record = crate::observer_store::Saved {
+                    access: access.clone(),
+                    automatic: saved.as_ref().is_some_and(|s| s.automatic),
+                    address: ip,
+                    port,
+                };
+                // Manual sharing remains available with a locked/missing vault,
+                // but an unreadable existing record is never overwritten.
+                let persistent = if storage_error.is_none() {
+                    let write = record.clone();
+                    match tokio::task::spawn_blocking(move || crate::observer_store::save(&write))
+                        .await
+                    {
+                        Ok(Ok(())) => {
+                            saved = Some(record);
+                            true
+                        }
+                        _ => {
+                            storage_error = Some("Pairing cannot be saved. This sharing session will not survive a Nexus restart.".into());
+                            false
+                        }
+                    }
+                } else {
+                    false
+                };
                 let auth_key = hmac::Key::new(hmac::HMAC_SHA256, &secret);
                 let auth_tag = hmac::sign(&auth_key, access.as_bytes());
                 let code = new_code()?;
@@ -166,6 +251,7 @@ pub(crate) async fn action(
                     cache: Mutex::new(HashMap::new()),
                     work: Arc::new(tokio::sync::Semaphore::new(16)),
                     tune: Arc::new(apply_listen),
+                    persistent,
                 });
                 let running = s.clone();
                 tauri::async_runtime::spawn(async move {
@@ -191,9 +277,54 @@ pub(crate) async fn action(
             }
         }
     }
-    Ok(status(
-        slot.as_deref().filter(|s| s.active.load(Ordering::SeqCst)),
-    ))
+    let mut result = status(slot.as_deref().filter(|s| s.active.load(Ordering::SeqCst)));
+    result.automatic = saved.as_ref().is_some_and(|s| s.automatic);
+    result.persistent = saved.is_some() || result.persistent;
+    result.storage_error = storage_error;
+    if slot.is_none() {
+        if let Some(s) = saved {
+            result.address = s.address.to_string();
+            result.port = s.port;
+        }
+    }
+    Ok(result)
+}
+
+pub(crate) fn restore_at_startup() {
+    tauri::async_runtime::spawn(async {
+        let Ok(Ok(Some(saved))) = tokio::task::spawn_blocking(crate::observer_store::load).await
+        else {
+            return;
+        };
+        // A laptop may launch before Wi-Fi has finished reconnecting. Retry
+        // only the listener, bounded to one minute; local choices cancel it.
+        for attempt in 0..=12 {
+            if MANUAL_ACTION.load(Ordering::SeqCst) {
+                return;
+            }
+            let Some(start) = restore_selection(Some(&saved)) else {
+                return;
+            };
+            match action_impl(crate::remote_service::Origin::Shack, start, true).await {
+                Ok(_) => return,
+                Err(error) if attempt == 12 => tempo_core::applog::warn(
+                    "browser-panels",
+                    &format!("Automatic sharing did not start: {error}"),
+                ),
+                Err(_) => tokio::time::sleep(Duration::from_secs(5)).await,
+            }
+        }
+    });
+}
+
+fn restore_selection(saved: Option<&crate::observer_store::Saved>) -> Option<Action> {
+    let saved = saved.filter(|s| s.automatic && s.valid())?;
+    // Never follow a laptop onto another private-address Wi-Fi automatically.
+    // The configured address must belong to a local interface for bind to work.
+    Some(Action::Start {
+        address: Some(saved.address.to_string()),
+        port: Some(saved.port),
+    })
 }
 
 fn new_code() -> Result<String, String> {
@@ -234,7 +365,7 @@ fn pair(s: &Session, request: Pair) -> Result<Value, String> {
         attempts.1 += 1;
         return Err("Incorrect access code; check Nexus on the laptop".into());
     }
-    Ok(json!({ "access": s.access }))
+    Ok(json!({ "access": s.access, "persistent": s.persistent }))
 }
 
 fn one<'a>(h: &'a Head, key: &str) -> Option<&'a str> {
@@ -547,6 +678,52 @@ fn cached_read(s: &Session, cmd: &str, args: &str) -> Result<Value, String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn observer_startup_requires_explicit_valid_saved_consent_and_only_selects_a_listener() {
+        let mut saved = crate::observer_store::Saved {
+            access: "a".repeat(64),
+            automatic: false,
+            address: "192.168.1.10".parse().unwrap(),
+            port: PORT,
+        };
+        assert!(restore_selection(None).is_none());
+        assert!(restore_selection(Some(&saved)).is_none());
+        saved.automatic = true;
+        match restore_selection(Some(&saved)).unwrap() {
+            Action::Start { address, port } => {
+                assert_eq!(address.as_deref(), Some("192.168.1.10"));
+                assert_eq!(port, Some(PORT));
+            }
+            _ => panic!("startup may only start the private listener"),
+        }
+        saved.address = Ipv4Addr::UNSPECIFIED;
+        assert!(restore_selection(Some(&saved)).is_none());
+        assert!(serde_json::from_str::<Action>(
+            r#"{"kind":"automatic","enabled":true,"transmit":true}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn observer_restarted_listener_accepts_saved_bearer_but_a_forgotten_pairing_does_not() {
+        let mut old = test_session();
+        let access = "a".repeat(64);
+        let session = Arc::get_mut(&mut old).unwrap();
+        session.access = access.clone();
+        session.auth_tag = hmac::sign(&session.auth_key, access.as_bytes());
+        let head = parse_head(format!("GET /observer/read/state HTTP/1.1\r\nHost: 192.168.1.10:7375\r\nAuthorization: Bearer {access}").as_bytes()).unwrap();
+        assert!(admitted(&old, &head));
+        let mut restarted = test_session();
+        let session = Arc::get_mut(&mut restarted).unwrap();
+        session.auth_key = hmac::Key::new(hmac::HMAC_SHA256, b"a different process key");
+        session.access = access.clone();
+        session.auth_tag = hmac::sign(&session.auth_key, access.as_bytes());
+        assert!(admitted(&restarted, &head));
+        restarted.active.store(false, Ordering::SeqCst);
+        assert!(!admitted(&restarted, &head));
+        assert!(!admitted(&test_session(), &head));
+    }
+
     fn test_session() -> Arc<Session> {
         let key = hmac::Key::new(hmac::HMAC_SHA256, b"test-only-access");
         let tag = hmac::sign(&key, b"test-only-access");
@@ -567,6 +744,7 @@ mod tests {
             cache: Mutex::new(HashMap::new()),
             work: Arc::new(tokio::sync::Semaphore::new(16)),
             tune: Arc::new(apply_listen),
+            persistent: false,
         })
     }
 
@@ -860,6 +1038,7 @@ mod tests {
             cache: Mutex::new(HashMap::new()),
             work: Arc::new(tokio::sync::Semaphore::new(16)),
             tune: Arc::new(apply_listen),
+            persistent: false,
         };
         let valid = "GET /observer/read/state HTTP/1.1\r\nHost: 192.168.1.10:7375\r\nAuthorization: Bearer test-only-access";
         assert!(admitted(&s, &parse_head(valid.as_bytes()).unwrap()));

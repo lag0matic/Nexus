@@ -9,6 +9,8 @@ const ui = join(dirname(fileURLToPath(import.meta.url)), '..')
 const dist = resolve(ui, 'dist')
 const fixture = JSON.parse(await readFile(join(ui, 'src/remote-web/__fixtures__/navigation-connect.json'), 'utf8'))
 const access = 'a'.repeat(64)
+let grant = access
+let pairings = 0
 const posts = []
 const monitorPanels = ['spots', 'bandmapPhone', 'bandmapCw', 'memories', 'dxped', 'sats', 'activation', 'operate', 'operatemap', 'waterfall', 'sstvviewer', 'fieldday', 'contestlog', 'contestscreen', 'fdclub']
 function monitor(panel) {
@@ -31,9 +33,10 @@ const server = createServer(async (req, res) => {
         const body = JSON.parse(Buffer.concat(chunks).toString())
         assert.deepEqual(Object.keys(body), ['code'])
         if (body.code !== '12345678') { res.writeHead(403).end('Incorrect access code'); return }
-        res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ access })); return
+        pairings++
+        res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ access: grant, persistent: true })); return
       }
-      if (req.headers.authorization !== `Bearer ${access}`) { res.writeHead(403).end('No access'); return }
+      if (req.headers.authorization !== `Bearer ${grant}`) { res.writeHead(403).end('Enter the current access code shown in Nexus'); return }
       const json = body => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(body)) }
       if (req.method === 'POST') {
         assert.equal(url.pathname, '/observer/listen')
@@ -102,6 +105,7 @@ try {
   for (const [width,height] of [[375,812], [768,1024], [1024,768], [1920,1080]]) {
     await call('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:width<600 })
     for (const panel of ['pota', 'needed', 'conditions', ...monitorPanels]) {
+      await evaluate(`(() => { try { localStorage.clear(); sessionStorage.clear() } catch {} })()`)
       await call('Page.navigate', { url:`http://127.0.0.1:${server.address().port}${panel === 'pota' ? '/' : `/panels/${panel}`}` })
       await wait(`!!document.querySelector('#observer-code')`)
       const entry = await evaluate(`(() => {const e=document.querySelector('#observer-code');const r=e.getBoundingClientRect();return {right:r.right,width:r.width,scroll:document.documentElement.scrollWidth}})()`)
@@ -159,15 +163,26 @@ try {
       }
       assert.equal(await evaluate(`location.hash`), '', 'access removed from visible address')
       assert.equal(await evaluate(`Array.from(document.querySelectorAll('.observer-header a')).some(a=>a.href.includes('access='))`), false, 'panel addresses never include credentials')
-      assert.equal(await evaluate(`Object.values(localStorage).concat(Object.values(sessionStorage)).some(v=>v.includes(${JSON.stringify(access)}))`), false, 'credentials never saved')
+      assert.equal(await evaluate(`localStorage.getItem('nexus.browser-panels.access')`), access, 'explicit remembered pairing survives browser restart')
+      assert.equal(await evaluate(`Object.values(localStorage).some(v=>v.includes('12345678'))`), false, 'short pairing code never saved')
       const shot = await call('Page.captureScreenshot', { format:'png' })
       await writeFile(join(output, `${panel}-${width}x${height}.png`), Buffer.from(shot.data,'base64'))
       console.log(`PASS ${panel} ${width}x${height}: built assets, real layout and browser input`)
     }
   }
+  const pairedBeforeReload = pairings
+  const clicksBeforeReload = posts.length
   await call('Page.reload')
+  await wait(`!!document.querySelector('.observer-header')`)
+  assert.equal(pairings, pairedBeforeReload, 'reload never re-pairs')
+  assert.equal(posts.length, clicksBeforeReload, 'reload never replays a tune')
+  await call('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/panels/pota` })
+  await wait(`!!document.querySelector('.observer-spot:not(:disabled)')`)
+  assert.equal(pairings, pairedBeforeReload, 'another document restores saved access')
+  grant = 'b'.repeat(64)
   await wait(`!!document.querySelector('#observer-code')`)
-  console.log('PASS: root address, typed short code, wrong-code refusal, tab-memory access and reload re-entry')
+  assert.equal(await evaluate(`localStorage.getItem('nexus.browser-panels.access')`), null, 'server revocation clears stale access and offers pairing')
+  console.log('PASS: remembered pairing, refresh and new-document restoration, revoked-access recovery; no automatic tuning')
   assert.deepEqual(faults, [], 'no browser runtime exceptions')
   console.log('PASS: only receive-only POST bodies; no transmit or arming commands')
 } finally {

@@ -1,6 +1,6 @@
 # Custom Longwave Linux Build
 
-Version: `1.21.0-longwave.10`.
+Version: `1.21.0-longwave.11`.
 Branch: `codex/lan-panel-library`.
 Upstream integrated: `a4df10bf967783dce386f69e60dc98ffb9b060aa`.
 
@@ -26,6 +26,14 @@ The previous custom branches, `codex/lan-observer-panels` and
   preview/latest picture are view-only. No log editing, arming, PTT, ATU or
   Doppler/automatic tuning is available through these browser panels.
 - Stock updater prompts and downloads remain disabled for custom builds.
+- Browser pairing survives refresh. With Remember this browser selected, it also
+  survives browser and Nexus restarts. Enable Start browser sharing with Nexus
+  in the local Browser panels dialog for automatic startup (off by default).
+  Stop pauses sharing without forgetting browsers; Forget paired browsers stops
+  sharing, disables automatic startup and revokes all saved access. Pairing is
+  kept in the OS credential store, separate from Remote. If that store is locked
+  or unavailable, manual sharing remains available with a warning, but a new
+  Nexus session requires pairing again. No plaintext-file fallback is used.
 
 Longwave uploads and stamps are integrated into upstream's replacement Contact
 Card. The Longwave upload column now sorts through the same engine query path
@@ -61,6 +69,11 @@ data backup. The new build should retain saved Longwave settings and certificate
 approval; never work around a new TLS failure by disabling verification.
 
 Use LAN sharing only on a trusted private network, without port forwarding.
+Remembered browser access is stored for the exact address and port. A hostname
+or DHCP reservation avoids a changed laptop IP invalidating the phone bookmark.
+Automatic startup retries for up to a minute while the laptop network reconnects.
+It binds only the configured private address, not a newly detected Wi-Fi address.
+If DHCP changes that address, reconfigure it locally or use a reservation.
 
 If the desktop microphone keys the IC-7300 but USB audio stops reaching it,
 check both the configured playback device and the rig's modulation input.

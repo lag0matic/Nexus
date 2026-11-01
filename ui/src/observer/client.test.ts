@@ -1,11 +1,40 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { listenMode, listenToSpot, observerPanelData } from './client'
+import { listenMode, listenToSpot, observerPanelData, observerState, pairBrowser, restoreBrowserAccess, forgetBrowserAccess } from './client'
 
 const state = { radio: 2, catOk: true, busy: false, observedAt: 1234 }
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); delete window.__NEXUS_OBSERVER_ACCESS__ })
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); delete window.__NEXUS_OBSERVER_ACCESS__ })
 
 describe('receive-only browser transport', () => {
+  it('clears revoked access but never discards pairing for an offline server or ordinary panel error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ access: 'a'.repeat(64), persistent: true })))
+    await pairBrowser('12345678')
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    await expect(observerState()).rejects.toThrow('offline')
+    expect(localStorage.length).toBe(1)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Operation not allowed', { status: 403 })))
+    await expect(observerPanelData('memories')).rejects.toThrow()
+    expect(localStorage.length).toBe(1)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Enter the current access code shown in Nexus', { status: 403 })))
+    await expect(observerState()).rejects.toThrow()
+    expect(localStorage.length).toBe(0)
+    expect(restoreBrowserAccess()).toBe(false)
+  })
+  it('forgets this browser without issuing any radio or server operation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ access: 'a'.repeat(64), persistent: true })))
+    await pairBrowser('12345678')
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    forgetBrowserAccess()
+    expect(restoreBrowserAccess()).toBe(false)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+  it('falls back to session storage when Nexus could not save its own pairing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ access: 'a'.repeat(64), persistent: false })))
+    await pairBrowser('12345678')
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(1)
+  })
   it('fetches monitor data by authenticated GET, never through the command bridge', async () => {
     window.__NEXUS_OBSERVER_ACCESS__ = 'test-only-access'
     const fetcher = vi.fn().mockResolvedValue(Response.json({ panel: 'memories' }))

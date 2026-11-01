@@ -237,8 +237,8 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 // Public API
 // ---------------------------------------------------------------------------
 
-export type ObserverPanelStatus = { running: boolean; address: string; port: number; accessCode?: string; links: Partial<Record<import('./observer/panels').ObserverPanel, string>> }
-export type ObserverPanelAction = { kind: 'status' | 'stop' } | { kind: 'start'; address?: string; port?: number }
+export type ObserverPanelStatus = { running: boolean; address: string; port: number; accessCode?: string; automatic?: boolean; persistent?: boolean; storageError?: string; links: Partial<Record<import('./observer/panels').ObserverPanel, string>> }
+export type ObserverPanelAction = { kind: 'status' | 'stop' | 'forget' } | { kind: 'automatic'; enabled: boolean } | { kind: 'start'; address?: string; port?: number }
 export async function observerPanelAction(action: ObserverPanelAction): Promise<ObserverPanelStatus> {
   return invoke<ObserverPanelStatus>('observer_panel_action', { action, origin: isStreamInput() ? 'stream' : 'shack' })
 }

@@ -7,5 +7,6 @@
 .browser-share-link > span { display: flex; gap: 8px; }
 .browser-share-link input { min-width: 0; flex: 1 1 0; padding: 8px; }
 .browser-share-link button { display: inline-flex; align-items: center; justify-content: center; width: 36px; flex: 0 0 36px; }
-.browser-share-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.browser-share-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.browser-share-startup { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
 .browser-share-actions button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; }

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Crosshair, Search, ExternalLink, RefreshCw } from 'lucide-react'
+import { Crosshair, Search, ExternalLink, RefreshCw, LogOut } from 'lucide-react'
 import { ConnectView } from '../components/ConnectView'
 import { TV_PRESETS } from '../features/connectPresets'
 import { getNeedAlerts, getOtaSpots, getPropagation, getTvStation } from '../api'
 import type { NeedTag, PropagationSnapshot } from '../types'
 import { useViewport } from '../useViewport'
 import { bandFromKhz } from '../otaHunt'
-import { listenMode, listenToSpot, observerState, observerPanelData, type MonitorData, type ObserverRadio } from './client'
+import { listenMode, listenToSpot, observerState, observerPanelData, forgetBrowserAccess, type MonitorData, type ObserverRadio } from './client'
 import { OBSERVER_PANELS, observerPanel, POTA_BANDS, filterMode, type ObserverPanel } from './panels'
 import { MonitorPanel } from './MonitorPanel'
 
@@ -118,6 +118,7 @@ export function ObserverPanels() {
   return <div className="app observer-app">
     <header className="observer-header">
       <strong>Nexus</strong>
+      <button type="button" className="observer-refresh" onClick={forgetBrowserAccess} aria-label="Forget this browser" title="Forget this browser"><LogOut size={17} aria-hidden="true" /></button>
       <nav aria-label="Panels">{PANELS.map(({ id, label }) => <a key={id}
         href={`/panels/${id}`}
         aria-current={panel === id ? 'page' : undefined}

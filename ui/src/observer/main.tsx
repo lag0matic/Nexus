@@ -4,7 +4,7 @@ import { ObserverAccess } from './ObserverAccess'
 import '../styles.css'
 import './observer.css'
 
-// Credentials stay in this tab's memory, never the address or browser storage.
+// Pairing is scoped to this browser origin, never carried in a bookmark/address.
 history.replaceState(null, '', location.pathname)
 window.__NEXUS_TV_RPC__ = '/observer/read'
 document.documentElement.setAttribute('data-theme', 'dark')

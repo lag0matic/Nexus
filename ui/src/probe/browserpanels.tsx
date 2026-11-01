@@ -5,6 +5,7 @@ import { useEscStop } from '../useEscStop'
 
 const state = { down: 0, up: 0, macro: 0, stop: 0, keyed: false, commands: [] as string[] }
 let running = false
+let automatic = false
 ;(window as unknown as { __shareProbe: () => typeof state }).__shareProbe = () => ({ ...state, commands: [...state.commands] })
 const control = new URLSearchParams(location.search).get('control') === '1'
 window.addEventListener('keydown', e => {
@@ -14,11 +15,13 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => { if (e.code === 'Space') { state.up++; state.keyed = false } })
 window.__TAURI_INTERNALS__ = { invoke: async <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
   if (cmd !== 'observer_panel_action') throw new Error(`Unexpected command: ${cmd}`)
-  const action = args?.action as { kind: string }
+  const action = args?.action as { kind: string; enabled?: boolean }
   state.commands.push(action.kind)
   if (action.kind === 'start') running = true
   if (action.kind === 'stop') running = false
-  return { running, address: '192.168.1.10', port: 7375, accessCode: running ? '12345678' : null,
+  if (action.kind === 'automatic') automatic = action.enabled === true
+  if (action.kind === 'forget') { automatic = false; running = false }
+  return { running, automatic, persistent: running || automatic, address: '192.168.1.10', port: 7375, accessCode: running ? '12345678' : null,
     links: running ? { pota: 'http://192.168.1.10:7375' } : {} } as T
 } }
 document.documentElement.dataset.theme = 'dark'
