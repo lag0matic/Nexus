@@ -62,6 +62,7 @@ try {
     await press('Escape', 'Escape', 27)
     await wait(`!document.querySelector('[role=dialog]')`)
     assert.equal((await evaluate('window.__shareProbe()')).stop, 1, 'Escape still reaches the real global stop hook')
+    await wait(`document.activeElement === document.querySelector('.browser-share-trigger')`)
     assert.ok(await evaluate(`document.activeElement === document.querySelector('.browser-share-trigger')`), 'focus restored')
 
     await evaluate(`document.querySelector('#outside').focus()`)
