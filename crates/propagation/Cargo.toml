@@ -62,3 +62,7 @@ required-features = ["longwave"]
 [[example]]
 name = "longwave_history_check"
 required-features = ["longwave"]
+
+[[example]]
+name = "drap_compare"
+required-features = ["live"]

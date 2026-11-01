@@ -1,8 +1,8 @@
 # Custom Longwave Linux Build
 
-Version: `1.21.0-longwave.11`.
-Branch: `codex/lan-panel-library`.
-Upstream integrated: `a4df10bf967783dce386f69e60dc98ffb9b060aa`.
+Version: `1.22.0-longwave.12`.
+Branch: `codex/upstream-pc-mic-20261101`.
+Upstream integrated: `7ed3f41c9874547f8af018e56be28594b75a1f99`.
 
 This includes upstream's unreleased work, not a new official Nexus release.
 The previous custom branches, `codex/lan-observer-panels` and
@@ -11,7 +11,11 @@ The previous custom branches, `codex/lan-observer-panels` and
 ## Retained Changes
 
 - Longwave logbook selection, history, synchronization and per-contact upload results.
-- Desktop microphone routing with release-safe PTT.
+- Upstream live PC-microphone routing with release-safe PTT. The custom adapter
+  is removed. Its enabled state and selected input migrate once to the active
+  radio's upstream PC-mic settings; explicit upstream choices are preserved.
+  Voice-keyer recording retains its separate microphone setting. Other radios
+  are not enabled by the migration. New microphone gain starts at 0 dB.
 - IC-7300 PBT and manual notch controls. Tune switches the internal tuner
   inline/bypass; ATU starts its tuning cycle. Tune does not generate a carrier.
 - Receive-only LAN browser views for all 18 native pop-out panel types, with a
@@ -43,6 +47,13 @@ as the other services. Unrecognized upload outcomes stay blocked from retry.
 
 See `LINUX.md` for system dependencies. The custom x86_64 package is built in
 Ubuntu 22.04 with Rust 1.93.1 and Node 24, keeping the normal release profile.
+
+Do not reuse a native modem archive from a different checkout or ABI revision.
+When adopting an older build cache, clean `tempo-fast-sys` in both Cargo
+workspaces before building: `cargo clean -p tempo-fast-sys` and
+`cargo clean --manifest-path src-tauri/Cargo.toml -p tempo-fast-sys`. A stale
+Fortran archive can link successfully against newer Rust declarations and then
+crash at the FFI boundary. Keep the target directories scoped to the build.
 
 Stage the ignored DeepCW model and metadata according to
 `src-tauri/resources/deepcw/README.md`. Do not commit the model files.
@@ -82,3 +93,16 @@ audio on the laptop without a software change. The microphone patch was not
 removed; the observed failure was cleared by re-enumerating the USB device.
 Browser access does not encrypt traffic. An intermittent Linux UI-freeze report
 from the previous build remains unconfirmed; this merge is not a claimed fix.
+
+## PC Microphone Acceptance
+
+Configure Settings > Radio > Audio > Use this computer's microphone. On Linux,
+select distinct named physical cards for microphone and radio receive; upstream
+refuses sound-server aliases and ambiguous routing. Keep the IC-7300's DATA OFF
+MOD set to USB for ordinary USB/LSB voice. PTT release may play up to 200 ms of
+audio already captured; Stop TX, TX Off and faults unkey without that tail.
+
+Source and simulated checks cannot certify the laptop's actual audio devices.
+Verify microphone audio, release/Stop, rapid re-press and USB-disconnect behavior
+on the IC-7300 before normal operation. Keep the verified .9 package and a
+settings/local-log backup for rollback.

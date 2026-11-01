@@ -120,6 +120,10 @@ const MIGRATED = [
   // and the words for a call it refused or could not make.
   'components/ClientBanner.tsx',
   'features/clientWords.ts',
+  // The words for a restore refused while the radio is keyed (2026-10-29), born migrated.
+  'features/restoreWords.ts',
+  // The saved keys held back until the operator confirms them (2026-10-28), born migrated.
+  'components/KeyConfirmBanner.tsx',
   // This computer ▸ Audio (2026-10-08), born migrated: a driving computer's headset.
   'components/ThisComputerAudio.tsx',
   'components/ShackFilesSave.tsx',
@@ -233,6 +237,10 @@ const MIGRATED = [
   'propViz.ts',
   'openingAlert.ts',
   'stormAlert.ts',
+  // The flare heads-up toast, its copy in the catalog like the storm toast's.
+  'flareAlert.ts',
+  // The NOAA storm-watch heads-up toast (once per watch serial).
+  'arrivalAlert.ts',
   'tv/ConnectTv.tsx',
   // The dashboard bar over the Connect pop-out and the TV page: the index names, `UTC` and the
   // clock digits are tokens; its prose (the Stay behind toggle, the hover words) is the catalog's.
@@ -252,9 +260,14 @@ const MIGRATED = [
   'components/prop/BeaconMonitor.tsx',
   'components/prop/BestBandTable.tsx',
   'components/prop/ChaseFeedPane.tsx',
+  // FlareChip.tsx — the flare chip, moved out of MapView when the 3-D globe gained it too; born
+  // catalogued, so its `map.flare.*` entries are read here and not taken for orphans.
+  'components/prop/FlareChip.tsx',
   'components/prop/ChasePane.tsx',
   'components/prop/ClockPane.tsx',
   'components/prop/KpOutlookPane.tsx',
+  // The "coming" chip on the map and globe: NOAA's watch, the model line, a measured arrival.
+  'components/prop/ArrivalChip.tsx',
   'components/prop/DxpedCalendar.tsx',
   'components/prop/DxpedDigest.tsx',
   'components/prop/DxpedMonth.tsx',
@@ -267,6 +280,16 @@ const MIGRATED = [
   'components/prop/MeasuredMuf.tsx',
   'components/prop/OpeningStrip.tsx',
   'components/prop/OpeningsLogPane.tsx',
+  'components/prop/PathWhy.tsx',
+  'features/pathWhy.ts',
+  'components/prop/PathRoute.tsx',
+  'features/pathRoute.ts',
+  'features/pathRibbon.ts',
+  'components/prop/PathDayStrip.tsx',
+  'features/pathDay.ts',
+  'features/pathGrade.ts',
+  'components/prop/PathGradeCell.tsx',
+  'components/prop/ContactPath.tsx',
   'components/prop/ScalesAnnunciator.tsx',
   'components/prop/SolarTrends.tsx',
   'components/prop/SpaceWxGauges.tsx',
@@ -687,6 +710,7 @@ const MIGRATED = [
   'features/slotOverDropped.ts',
   // …and of a PTT press the station kept off the air for the radio's DAX — migrated from birth.
   'features/pttRefused.ts',
+  'features/pcMic.ts',
   // …and of a voice-keyer message the station dropped before the radio took DAX — migrated from
   // birth.
   'features/voiceDropped.ts',
@@ -947,6 +971,10 @@ const PARTIAL = [
   // this file. The rest of its palette labels are still code, the English "Auto (theme)" among
   // them, so it is partial in exactly this list's sense and does not belong on MIGRATED.
   'waterfall.ts',
+  // api.ts (2026-10-29) — for `callStation` alone: it puts the engine's English refusal of a
+  // click on a call shown as <...> in the operator's language (`shell.work.unresolved*`), which
+  // the orphan check can only see if it reads this file. Its other errors are still code.
+  'api.ts',
 ]
 
 /** Attributes whose value a human reads — on hover, or through a screen reader. */

@@ -303,7 +303,7 @@ import { ARRL_SECTIONS_BY_DIVISION, RETIRED_SECTIONS } from '../features/arrlSec
 // there is no Device Manager, so a "COM16" placeholder or a CP210x "Enhanced" label is a dead
 // end there (mac QA audit, 2026-08-17). The check moved to the shared platform module when
 // the modifier-chord labels needed it too.
-import { IS_MAC, IS_WINDOWS } from '../platform'
+import { IS_LINUX, IS_MAC, IS_WINDOWS } from '../platform'
 import { ampPortIsNetwork, joinAmpAddress, KPA_NET_PORT, splitAmpAddress } from '../settings/ampAddress'
 import { normaliseTyped, upperTyped } from '../typedInput'
 import { IotaListSettings } from './Iota'
@@ -399,7 +399,7 @@ interface Props {
    *  the tab unchanged. */
   palette?: PaletteSelection
   onPaletteChange?: (role: PaletteRoleId, presetId: string) => void
-  /** Settings ▸ Appearance ▸ Performance ▸ Motion — Follow the computer or Reduce (`useMotion`,
+  /** Settings ▸ App ▸ Performance ▸ Motion — Follow the computer or Reduce (`useMotion`,
    *  owned by App). Optional like the theme: without it the Performance section is not offered. */
   motion?: Motion
   onMotionChange?: (m: Motion) => void
@@ -857,15 +857,16 @@ type SettingsTab =
   | 'station'
   | 'remote'
   | 'radio'
+  | 'satellites'
   | 'phone'
   | 'cw'
   | 'digital'
   | 'spots'
   | 'logbook'
-  | 'logging'
+  | 'services'
   | 'contesting'
   | 'appearance'
-  | 'configurations'
+  | 'app'
 
 //
 // `label` is the ENGLISH source string and stays literal for the two parsers above. What the
@@ -878,15 +879,16 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; labelKey?: MessageKey }[]
   { id: 'station', label: 'Station', labelKey: 'settings.tabs.station' },
   { id: 'remote', label: 'Remote', labelKey: 'settings.tabs.remote' },
   { id: 'radio', label: 'Radio', labelKey: 'settings.tabs.radio' },
+  { id: 'satellites', label: 'Satellites', labelKey: 'settings.tabs.satellites' },
   { id: 'phone', label: 'Phone' },
   { id: 'cw', label: 'CW' },
   { id: 'digital', label: 'Digital' },
   { id: 'spots', label: 'Spots & Alerts', labelKey: 'settings.tabs.spots' },
   { id: 'logbook', label: 'Logbook', labelKey: 'settings.tabs.logbook' },
-  { id: 'logging', label: 'Logging & Connectors', labelKey: 'settings.tabs.logging' },
+  { id: 'services', label: 'Services', labelKey: 'settings.tabs.services' },
   { id: 'contesting', label: 'Contesting', labelKey: 'settings.tabs.contesting' },
   { id: 'appearance', label: 'Appearance', labelKey: 'settings.tabs.appearance' },
-  { id: 'configurations', label: 'Config', labelKey: 'settings.tabs.configurations' },
+  { id: 'app', label: 'App', labelKey: 'settings.tabs.app' },
 ]
 
 /** How the OmniRig connection option is offered, as a function of the platform.
@@ -941,6 +943,9 @@ export function radioPatch(s: Partial<RadioProfilePatch>): RadioProfilePatch {
     // the patch blanks on the profile it touches.
     sstvHoldDataSubmode: s.sstvHoldDataSubmode ?? false,
     aprsDataFm: s.aprsDataFm ?? false,
+    pcMic: s.pcMic ?? false,
+    pcMicDevice: s.pcMicDevice ?? '',
+    pcMicGainDb: s.pcMicGainDb ?? 0,
     audioIn: s.audioIn ?? '',
     audioOut: s.audioOut ?? '',
     txLevel: s.txLevel ?? 1,
@@ -4198,6 +4203,10 @@ export function SettingsPanel({
   const voiceMicOptions = form.voiceMicDevice && !audio.input.includes(form.voiceMicDevice)
     ? [form.voiceMicDevice, ...audio.input]
     : audio.input
+  // The computer microphone's picker: the same INPUT list, keeping a saved choice visible.
+  const pcMicOptions = form.pcMicDevice && !audio.input.includes(form.pcMicDevice)
+    ? [form.pcMicDevice, ...audio.input]
+    : audio.input
 
   // What one option READS. An enumerated device shows its human label; a stored value that is
   // not one of the entries we offer says so — a saved routing can go stale (rig off, USB port
@@ -4355,203 +4364,6 @@ export function SettingsPanel({
             </div>
           )}
           {/* ---- Workspace (UI-only prefs, applied live like the theme) ---- */}
-          {tab === 'configurations' && (
-            <fieldset className="settings-section" id="settings-data-folder" {...fold('data-folder')}>
-              <legend>{t('settings.dataFolder.legend')}</legend>
-              {/* The warning first: a synced folder is the reason most operators come here, and it
-                  is also the one way to lose contacts — two machines writing one log.adi through
-                  Dropbox/OneDrive resolve as a conflicted copy, not a merge. */}
-              <p className="settings-note">{t('settings.dataFolder.note')}</p>
-              <div className="settings-field">
-                <span className="settings-label">{t('settings.dataFolder.current.label')}</span>
-                <span className="settings-input mono" role="status">{dataFolder?.current ?? '—'}</span>
-                <span className="settings-hint">
-                  {dataFolder?.source === 'env'
-                    ? t('settings.dataFolder.source.env')
-                    : dataFolder?.source === 'chosen'
-                      ? t('settings.dataFolder.source.chosen')
-                      : t('settings.dataFolder.source.default')}
-                </span>
-                {dataFolder?.chosen && dataFolder.chosen !== dataFolder.current && (
-                  <span className="settings-hint" role="status">
-                    {t('settings.dataFolder.pending', { path: dataFolder.chosen })}
-                  </span>
-                )}
-                {/* C8 — the folder IN USE, which NEXUS_DATA_DIR and a hand-edited data-dir.json
-                    both reach without passing the refusal below. Nexus will not relocate it by
-                    itself: the log is in there, and opening the default folder instead would look
-                    like the contacts had gone. So it says so, every time Settings is opened. */}
-                {dataFolder?.network && (
-                  <span className="settings-warn" role="status">
-                    {t('settings.dataFolder.onNetwork')}
-                  </span>
-                )}
-                {dataFolder?.syncSuspected && (
-                  <span className="settings-warn" role="status">
-                    {t('settings.dataFolder.onSync')}
-                  </span>
-                )}
-              </div>
-              <div className="settings-field">
-                <span className="settings-label">{t('settings.dataFolder.path.label')}</span>
-                <div className="settings-input-row">
-                  <input
-                    className="settings-input"
-                    value={dataFolderPath}
-                    onChange={(e) => setDataFolderPath(e.target.value)}
-                    placeholder={dataFolder?.default ?? ''}
-                    aria-label={t('settings.dataFolder.path.label')}
-                    spellCheck={false}
-                    autoComplete="off"
-                  />
-                  {/* Desktop only: the picker is an OS dialog, so there is nothing to open in a
-                      browser. Hidden rather than disabled — a dead button reads as a fault, and
-                      the field beside it still takes a typed path. */}
-                  {isTauri() && (
-                    <button
-                      type="button"
-                      className="settings-linkbtn"
-                      onClick={() => void browseDataFolder()}
-                      title={t('settings.dataFolder.browse.title')}
-                    >
-                      {t('settings.dataFolder.browse')}
-                    </button>
-                  )}
-                </div>
-                <div className="rig-share-row">
-                  <button
-                    type="button"
-                    className="settings-linkbtn"
-                    disabled={!dataFolderPath.trim()}
-                    onClick={() => void chooseDataFolder(false)}
-                    title={t('settings.dataFolder.use.title')}
-                  >
-                    {t('settings.dataFolder.use')}
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-linkbtn"
-                    disabled={!dataFolderPath.trim()}
-                    onClick={() => void chooseDataFolder(true)}
-                    title={t('settings.dataFolder.copy.title')}
-                  >
-                    {t('settings.dataFolder.copy')}
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-linkbtn"
-                    onClick={() =>
-                      void withErrorToast(async () => {
-                        await clearDataFolder()
-                        setDataFolderNote(t('settings.dataFolder.chosen'))
-                        setDataFolderInfo(await getDataFolder())
-                      }, t('settings.dataFolder.failed'))
-                    }
-                    title={t('settings.dataFolder.reset.title')}
-                  >
-                    {t('settings.dataFolder.reset')}
-                  </button>
-                </div>
-                <span className="settings-hint">{t('settings.dataFolder.restart')}</span>
-                {dataFolderNote && (
-                  <span className="settings-hint" role="status">{dataFolderNote}</span>
-                )}
-              </div>
-            </fieldset>
-          )}
-
-          {tab === 'configurations' && (
-            <fieldset className="settings-section" id="settings-configurations" {...fold('configurations')}>
-              <legend>{t('settings.configurations.legend')}</legend>
-              <p className="settings-note">
-                <T k="settings.configurations.note" tags={{ em: <em /> }} />
-              </p>
-              {/* Back up / restore the whole station (#28 item 4). MOVED here from Radio →
-                  Transmit limits & sharing, unchanged: same handlers, same catalog keys, same
-                  markup. Backing up a whole station has nothing to do with transmit limits, and
-                  that mismatch is why operators did not find it — the registry's own comment on
-                  that section already said so. */}
-              <div className="settings-field">
-                <span className="settings-label">{t('settings.transmit.backup.label')}</span>
-                <div className="rig-share-row">
-                  <button
-                    type="button"
-                    className="settings-linkbtn"
-                    onClick={() =>
-                      withErrorToast(async () => {
-                        // The station's bundle, with the look on screen added beside it.
-                        const text = withAppearance(await exportSettingsBundle(), appearanceNow())
-                        const stamp = new Date().toISOString().slice(0, 10)
-                        // The FILE NAME is invariant (batch 8): a translated word in it would
-                        // reduce a non-Latin locale's backup to `nexus-settings-.json`.
-                        const path = await saveTextToDownloads(`nexus-settings-${stamp}.json`, text)
-                        pushToast(t('settings.transmit.backup.done', { path }), 'success')
-                      }, t('settings.transmit.backup.failed'))
-                    }
-                    title={t('settings.transmit.backup.title')}
-                  >
-                    {t('settings.transmit.backup.action')}
-                  </button>
-                  {/* #306: the same file, in a folder the operator picks. The dialog opens in
-                      Downloads with the dated name filled in; cancelling saves nothing. */}
-                  <button
-                    type="button"
-                    className="settings-linkbtn"
-                    onClick={() =>
-                      withErrorToast(async () => {
-                        const text = withAppearance(await exportSettingsBundle(), appearanceNow())
-                        const stamp = new Date().toISOString().slice(0, 10)
-                        const path = await saveTextAs(`nexus-settings-${stamp}.json`, text)
-                        if (path) pushToast(t('settings.transmit.backup.done', { path }), 'success')
-                      }, t('settings.transmit.backup.failed'))
-                    }
-                    title={t('settings.transmit.backup.saveAs.title')}
-                  >
-                    {t('settings.transmit.backup.saveAs')}
-                  </button>
-                  <input
-                    ref={backupFileRef}
-                    type="file"
-                    accept=".json"
-                    style={{ display: 'none' }}
-                    onChange={onRestoreBackup}
-                  />
-                  <button
-                    type="button"
-                    className="settings-linkbtn"
-                    onClick={() => backupFileRef.current?.click()}
-                    title={t('settings.transmit.restore.title')}
-                  >
-                    {t('settings.transmit.restore.action')}
-                  </button>
-                </div>
-                <span className="settings-hint">
-                  <T k="settings.transmit.backup.hint" tags={{ b: <strong /> }} />
-                </span>
-                <span className="settings-hint">{t('settings.transmit.backup.appearance')}</span>
-              </div>
-
-                {/* Start over. Deliberately the LAST thing in this tab: an operator who arrives
-                    here wanting a clean slate reads the backup affordance on the way past. */}
-              <div className="settings-field">
-                <span className="settings-label">{t('settings.configurations.reset.label')}</span>
-                <div className="rig-share-row">
-                  <button
-                    type="button"
-                    className="settings-linkbtn danger"
-                    onClick={handleResetConfig}
-                    title={t('settings.configurations.reset.title')}
-                  >
-                    {t('settings.configurations.reset.action')}
-                  </button>
-                </div>
-                <span className="settings-hint">
-                  <T k="settings.configurations.reset.hint" tags={{ b: <strong /> }} />
-                </span>
-              </div>
-            </fieldset>
-          )}
-
           {tab === 'appearance' && (
           <fieldset className="settings-section" id="settings-workspace" {...fold('workspace')}>
             <legend>{t('settings.workspace.legend')}</legend>
@@ -5049,43 +4861,6 @@ export function SettingsPanel({
           </fieldset>
           )}
 
-          {/* ---- Performance: Motion ----
-              `useMotion` (App owns it) had no control in Settings before this: Reduce was reachable
-              only through the computer's own reduce-motion setting. Per machine, like the theme. */}
-          {tab === 'appearance' && onMotionChange && (
-          <fieldset className="settings-section" id="settings-performance" {...fold('performance')}>
-            <legend>{t('settings.performance.legend')}</legend>
-            <div className="settings-grid settings-grid--lone">
-              <div className="settings-field">
-                <span className="settings-label">{t('settings.performance.motion.label')}</span>
-                <div
-                  className="theme-switcher"
-                  role="group"
-                  aria-label={t('settings.performance.motion.label')}
-                >
-                  <button
-                    type="button"
-                    className={`theme-chip${motion === 'system' ? ' active' : ''}`}
-                    aria-pressed={motion === 'system'}
-                    onClick={() => onMotionChange('system')}
-                  >
-                    {t('settings.performance.motion.system')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`theme-chip${motion === 'reduce' ? ' active' : ''}`}
-                    aria-pressed={motion === 'reduce'}
-                    onClick={() => onMotionChange('reduce')}
-                  >
-                    {t('settings.performance.motion.reduce')}
-                  </button>
-                </div>
-                <span className="settings-hint">{t('settings.performance.motion.hint')}</span>
-              </div>
-            </div>
-          </fieldset>
-          )}
-
           {/* ---- Connect on the TV: the read-only LAN page ----
               The toggle IS the LAN opt-in, so the copy has to say plainly what it
               exposes and to whom. Its threat model is NOT the Field Day
@@ -5161,7 +4936,7 @@ export function SettingsPanel({
           )}
 
           {/* ---- Features (modular toggles + goal profiles) ---- */}
-          {tab === 'appearance' && (
+          {tab === 'app' && (
           <fieldset className="settings-section" id="settings-features" {...fold('features')}>
             <legend>{t('settings.features.legend')}</legend>
             <div className="settings-field">
@@ -5256,7 +5031,7 @@ export function SettingsPanel({
           )}
 
           {/* ---- App updates: the beta (pre-release) channel opt-in ---- */}
-          {tab === 'appearance' && (
+          {tab === 'app' && (
           <fieldset className="settings-section" id="settings-app-updates" {...fold('app-updates')}>
             <legend>{t('settings.betaUpdates.legend')}</legend>
             <label className="settings-field">
@@ -5281,7 +5056,7 @@ export function SettingsPanel({
           )}
 
           {/* ---- Start at sign-in: launch Nexus when the operator signs in to this computer ---- */}
-          {tab === 'appearance' && (
+          {tab === 'app' && (
           <fieldset className="settings-section" id="settings-start-at-sign-in" {...fold('start-at-sign-in')}>
             <legend>{t('settings.launchAtLogin.legend')}</legend>
             <label className="settings-field">
@@ -5309,7 +5084,7 @@ export function SettingsPanel({
           {/* ---- This computer: what belongs to the computer the operator sits at while it drives a
               station over this network (client mode), kept here and never sent to the station. Its
               Audio is the headset the station's audio plays on and the microphone. ---- */}
-          {tab === 'appearance' && driving && (
+          {tab === 'app' && driving && (
           <fieldset className="settings-section" id="settings-this-computer" {...fold('this-computer')}>
             <legend>{t('settings.thisComputer.legend')}</legend>
             <div className="settings-featgroup">
@@ -5317,6 +5092,240 @@ export function SettingsPanel({
               <ThisComputerAudio />
             </div>
           </fieldset>
+          )}
+
+          {/* ---- Performance: Motion ----
+              `useMotion` (App owns it) had no control in Settings before this: Reduce was reachable
+              only through the computer's own reduce-motion setting. Per machine, like the theme. */}
+          {tab === 'app' && onMotionChange && (
+          <fieldset className="settings-section" id="settings-performance" {...fold('performance')}>
+            <legend>{t('settings.performance.legend')}</legend>
+            <div className="settings-grid settings-grid--lone">
+              <div className="settings-field">
+                <span className="settings-label">{t('settings.performance.motion.label')}</span>
+                <div
+                  className="theme-switcher"
+                  role="group"
+                  aria-label={t('settings.performance.motion.label')}
+                >
+                  <button
+                    type="button"
+                    className={`theme-chip${motion === 'system' ? ' active' : ''}`}
+                    aria-pressed={motion === 'system'}
+                    onClick={() => onMotionChange('system')}
+                  >
+                    {t('settings.performance.motion.system')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`theme-chip${motion === 'reduce' ? ' active' : ''}`}
+                    aria-pressed={motion === 'reduce'}
+                    onClick={() => onMotionChange('reduce')}
+                  >
+                    {t('settings.performance.motion.reduce')}
+                  </button>
+                </div>
+                <span className="settings-hint">{t('settings.performance.motion.hint')}</span>
+              </div>
+            </div>
+          </fieldset>
+          )}
+
+          {tab === 'app' && (
+            <fieldset className="settings-section" id="settings-data-folder" {...fold('data-folder')}>
+              <legend>{t('settings.dataFolder.legend')}</legend>
+              {/* The warning first: a synced folder is the reason most operators come here, and it
+                  is also the one way to lose contacts — two machines writing one log.adi through
+                  Dropbox/OneDrive resolve as a conflicted copy, not a merge. */}
+              <p className="settings-note">{t('settings.dataFolder.note')}</p>
+              <div className="settings-field">
+                <span className="settings-label">{t('settings.dataFolder.current.label')}</span>
+                <span className="settings-input mono" role="status">{dataFolder?.current ?? '—'}</span>
+                <span className="settings-hint">
+                  {dataFolder?.source === 'env'
+                    ? t('settings.dataFolder.source.env')
+                    : dataFolder?.source === 'chosen'
+                      ? t('settings.dataFolder.source.chosen')
+                      : t('settings.dataFolder.source.default')}
+                </span>
+                {dataFolder?.chosen && dataFolder.chosen !== dataFolder.current && (
+                  <span className="settings-hint" role="status">
+                    {t('settings.dataFolder.pending', { path: dataFolder.chosen })}
+                  </span>
+                )}
+                {/* C8 — the folder IN USE, which NEXUS_DATA_DIR and a hand-edited data-dir.json
+                    both reach without passing the refusal below. Nexus will not relocate it by
+                    itself: the log is in there, and opening the default folder instead would look
+                    like the contacts had gone. So it says so, every time Settings is opened. */}
+                {dataFolder?.network && (
+                  <span className="settings-warn" role="status">
+                    {t('settings.dataFolder.onNetwork')}
+                  </span>
+                )}
+                {dataFolder?.syncSuspected && (
+                  <span className="settings-warn" role="status">
+                    {t('settings.dataFolder.onSync')}
+                  </span>
+                )}
+              </div>
+              <div className="settings-field">
+                <span className="settings-label">{t('settings.dataFolder.path.label')}</span>
+                <div className="settings-input-row">
+                  <input
+                    className="settings-input"
+                    value={dataFolderPath}
+                    onChange={(e) => setDataFolderPath(e.target.value)}
+                    placeholder={dataFolder?.default ?? ''}
+                    aria-label={t('settings.dataFolder.path.label')}
+                    spellCheck={false}
+                    autoComplete="off"
+                  />
+                  {/* Desktop only: the picker is an OS dialog, so there is nothing to open in a
+                      browser. Hidden rather than disabled — a dead button reads as a fault, and
+                      the field beside it still takes a typed path. */}
+                  {isTauri() && (
+                    <button
+                      type="button"
+                      className="settings-linkbtn"
+                      onClick={() => void browseDataFolder()}
+                      title={t('settings.dataFolder.browse.title')}
+                    >
+                      {t('settings.dataFolder.browse')}
+                    </button>
+                  )}
+                </div>
+                <div className="rig-share-row">
+                  <button
+                    type="button"
+                    className="settings-linkbtn"
+                    disabled={!dataFolderPath.trim()}
+                    onClick={() => void chooseDataFolder(false)}
+                    title={t('settings.dataFolder.use.title')}
+                  >
+                    {t('settings.dataFolder.use')}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-linkbtn"
+                    disabled={!dataFolderPath.trim()}
+                    onClick={() => void chooseDataFolder(true)}
+                    title={t('settings.dataFolder.copy.title')}
+                  >
+                    {t('settings.dataFolder.copy')}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-linkbtn"
+                    onClick={() =>
+                      void withErrorToast(async () => {
+                        await clearDataFolder()
+                        setDataFolderNote(t('settings.dataFolder.chosen'))
+                        setDataFolderInfo(await getDataFolder())
+                      }, t('settings.dataFolder.failed'))
+                    }
+                    title={t('settings.dataFolder.reset.title')}
+                  >
+                    {t('settings.dataFolder.reset')}
+                  </button>
+                </div>
+                <span className="settings-hint">{t('settings.dataFolder.restart')}</span>
+                {dataFolderNote && (
+                  <span className="settings-hint" role="status">{dataFolderNote}</span>
+                )}
+              </div>
+            </fieldset>
+          )}
+
+          {tab === 'app' && (
+            <fieldset className="settings-section" id="settings-configurations" {...fold('configurations')}>
+              <legend>{t('settings.configurations.legend')}</legend>
+              <p className="settings-note">
+                <T k="settings.configurations.note" tags={{ em: <em /> }} />
+              </p>
+              {/* Back up / restore the whole station (#28 item 4). MOVED here from Radio →
+                  Transmit limits & sharing, unchanged: same handlers, same catalog keys, same
+                  markup. Backing up a whole station has nothing to do with transmit limits, and
+                  that mismatch is why operators did not find it — the registry's own comment on
+                  that section already said so. */}
+              <div className="settings-field">
+                <span className="settings-label">{t('settings.transmit.backup.label')}</span>
+                <div className="rig-share-row">
+                  <button
+                    type="button"
+                    className="settings-linkbtn"
+                    onClick={() =>
+                      withErrorToast(async () => {
+                        // The station's bundle, with the look on screen added beside it.
+                        const text = withAppearance(await exportSettingsBundle(), appearanceNow())
+                        const stamp = new Date().toISOString().slice(0, 10)
+                        // The FILE NAME is invariant (batch 8): a translated word in it would
+                        // reduce a non-Latin locale's backup to `nexus-settings-.json`.
+                        const path = await saveTextToDownloads(`nexus-settings-${stamp}.json`, text)
+                        pushToast(t('settings.transmit.backup.done', { path }), 'success')
+                      }, t('settings.transmit.backup.failed'))
+                    }
+                    title={t('settings.transmit.backup.title')}
+                  >
+                    {t('settings.transmit.backup.action')}
+                  </button>
+                  {/* #306: the same file, in a folder the operator picks. The dialog opens in
+                      Downloads with the dated name filled in; cancelling saves nothing. */}
+                  <button
+                    type="button"
+                    className="settings-linkbtn"
+                    onClick={() =>
+                      withErrorToast(async () => {
+                        const text = withAppearance(await exportSettingsBundle(), appearanceNow())
+                        const stamp = new Date().toISOString().slice(0, 10)
+                        const path = await saveTextAs(`nexus-settings-${stamp}.json`, text)
+                        if (path) pushToast(t('settings.transmit.backup.done', { path }), 'success')
+                      }, t('settings.transmit.backup.failed'))
+                    }
+                    title={t('settings.transmit.backup.saveAs.title')}
+                  >
+                    {t('settings.transmit.backup.saveAs')}
+                  </button>
+                  <input
+                    ref={backupFileRef}
+                    type="file"
+                    accept=".json"
+                    style={{ display: 'none' }}
+                    onChange={onRestoreBackup}
+                  />
+                  <button
+                    type="button"
+                    className="settings-linkbtn"
+                    onClick={() => backupFileRef.current?.click()}
+                    title={t('settings.transmit.restore.title')}
+                  >
+                    {t('settings.transmit.restore.action')}
+                  </button>
+                </div>
+                <span className="settings-hint">
+                  <T k="settings.transmit.backup.hint" tags={{ b: <strong /> }} />
+                </span>
+                <span className="settings-hint">{t('settings.transmit.backup.appearance')}</span>
+              </div>
+
+                {/* Start over. Deliberately the LAST thing in this tab: an operator who arrives
+                    here wanting a clean slate reads the backup affordance on the way past. */}
+              <div className="settings-field">
+                <span className="settings-label">{t('settings.configurations.reset.label')}</span>
+                <div className="rig-share-row">
+                  <button
+                    type="button"
+                    className="settings-linkbtn danger"
+                    onClick={handleResetConfig}
+                    title={t('settings.configurations.reset.title')}
+                  >
+                    {t('settings.configurations.reset.action')}
+                  </button>
+                </div>
+                <span className="settings-hint">
+                  <T k="settings.configurations.reset.hint" tags={{ b: <strong /> }} />
+                </span>
+              </div>
+            </fieldset>
           )}
 
           {/* ---- Operator & radio ---- */}
@@ -6872,7 +6881,12 @@ export function SettingsPanel({
                     <span className="toggle-knob" />
                   </button>
                   <span className="settings-hint">
-                    <T k="settings.rigControl.aprsDataFm.hint" tags={{ b: <strong /> }} />
+                    {/* The FT-991A's packet port menu, or an Icom's DATA MOD input. */}
+                    {form.rigModel === 1035 ? (
+                      <T k="settings.rigControl.aprsDataFm.hint" tags={{ b: <strong /> }} />
+                    ) : (
+                      <T k="settings.rigControl.aprsDataFm.hintIcom" tags={{ b: <strong /> }} />
+                    )}
                   </span>
                 </label>
               )}
@@ -7417,6 +7431,70 @@ export function SettingsPanel({
                 </span>
               </label>
             </div>
+            {/* The computer's microphone for Phone: per radio, off by default. With it on, Phone's
+                PTT sends this computer's microphone to the radio by its transmit audio route
+                (crates/tempo-app/src/engine/pc_mic.rs); off, PTT keys the radio's own microphone. */}
+            <div className="settings-featgroup">
+              <span className="settings-featgroup-title">{t('settings.audio.pcMic.title')}</span>
+              <div className="settings-field">
+                <span className="settings-label">{t('settings.audio.pcMic.label')}</span>
+                <button disabled={locked('pcMic')} data-setting="pcMic"
+                  type="button"
+                  role="switch"
+                  aria-checked={form.pcMic ?? false}
+                  className={`toggle${form.pcMic ? ' on' : ''}`}
+                  onClick={() => updateBool('pcMic', !form.pcMic)}
+                  aria-label={t('settings.audio.pcMic.label')}
+                >
+                  <span className="toggle-knob" />
+                </button>
+                {setAtStation('pcMic')}
+                <span className="settings-hint">{t('settings.audio.pcMic.hint')}</span>
+              </div>
+              {/* From a computer driving the station all three are the station's, shown read-only
+                  whatever the switch says. */}
+              {(form.pcMic || stationOnly('pcMic')) && (
+                <>
+                  <label className="settings-field">
+                    <span className="settings-label">{t('settings.audio.pcMic.device.label')}</span>
+                    <select disabled={locked('pcMicDevice')} data-setting="pcMicDevice"
+                      className="settings-input"
+                      value={form.pcMicDevice ?? ''}
+                      onChange={(e) => update('pcMicDevice', e.target.value)}
+                    >
+                      <option value="">{t('settings.audio.pcMic.device.none')}</option>
+                      {pcMicOptions.map((d) => (
+                        <option key={d} value={d}>
+                          {audioLabel(d, 'input')}
+                        </option>
+                      ))}
+                    </select>
+                    {setAtStation('pcMicDevice')}
+                    <span className="settings-hint">{t('settings.audio.pcMic.device.hint')}</span>
+                  </label>
+                  <label className="settings-field">
+                    <span className="settings-label">
+                      {t('settings.audio.pcMic.gain.label')}{' '}
+                      <span className="settings-value">
+                        {t('settings.audio.pcMic.gain.value', { db: Math.round(form.pcMicGainDb ?? 0) })}
+                      </span>
+                    </span>
+                    <input disabled={locked('pcMicGainDb')} data-setting="pcMicGainDb"
+                      className="settings-slider"
+                      type="range"
+                      min="-20"
+                      max="20"
+                      step="1"
+                      value={String(Math.round(form.pcMicGainDb ?? 0))}
+                      onChange={(e) => updateNum('pcMicGainDb', Number(e.target.value))}
+                      aria-label={t('settings.audio.pcMic.gain.label')}
+                    />
+                    {setAtStation('pcMicGainDb')}
+                    <span className="settings-hint">{t('settings.audio.pcMic.gain.hint')}</span>
+                  </label>
+                </>
+              )}
+            </div>
           </fieldset>
 
           <fieldset className="settings-section" id="settings-headphone-monitor" {...fold('headphone-monitor')}>
@@ -7459,6 +7537,11 @@ export function SettingsPanel({
                 <span className="settings-hint">
                   {t('settings.headphoneMonitor.device.hint')}
                 </span>
+                {IS_LINUX && (
+                  <span className="settings-hint">
+                    {t('settings.headphoneMonitor.device.linuxHint')}
+                  </span>
+                )}
               </label>
 
               <label className="settings-field">
@@ -7554,6 +7637,12 @@ export function SettingsPanel({
             </div>
           </fieldset>
 
+          </>
+          )}
+
+          {/* ---- Satellites (the 2026-10 regroup: its own tab) ---- */}
+          {tab === 'satellites' && (
+          <>
           {/* ---- Satellite Doppler + rotator manners (Phase 1 sat station) ---- */}
           <fieldset className="settings-section" id="settings-satellite-doppler" {...fold('satellite-doppler')}>
             <legend>{t('settings.satelliteDoppler.legend')}</legend>
@@ -7600,7 +7689,11 @@ export function SettingsPanel({
                   disabled={editingRadioId != null && editingRadioId !== (activeRadioId ?? form.activeRadio)}
                   title={
                     editingRadioId != null && editingRadioId !== (activeRadioId ?? form.activeRadio)
-                      ? t('settings.satelliteDoppler.vfoMap.otherRadio')
+                      ? t('settings.satelliteDoppler.vfoMap.otherRadio', {
+                          name:
+                            form.radios?.find((r) => r.id === editingRadioId)?.name ??
+                            t('settings.radios.anotherRadio'),
+                        })
                       : undefined
                   }
                   onChange={(e) => setSatVfoMap(e.target.value as NonNullable<Settings['satVfoMap']>)}
@@ -7801,7 +7894,11 @@ export function SettingsPanel({
               )}
             </div>
           </fieldset>
+          </>
+          )}
 
+          {tab === 'radio' && (
+          <>
           <fieldset className="settings-section" id="settings-rotator" {...fold('rotator')}>
             <legend>{t('settings.rotator.legend')}</legend>
             <p className="settings-note">{t('settings.rotator.note')}</p>
@@ -9263,6 +9360,13 @@ export function SettingsPanel({
           </fieldset>
           )}
 
+          {/* ---- Weak-signal and beacons: the five rarely needed modes under one heading, each
+              keeping its own legend and anchor. For a new operator the whole group folds to its
+              heading; a deep link or search pick to one of the five opens it. ---- */}
+          {tab === 'digital' && (
+          <fieldset className="settings-section" id="settings-weak-signal" {...fold('weak-signal')}>
+            <legend>{t('settings.weakSignal.legend')}</legend>
+            <div className="settings-subsections">
           {/* ---- JT65: submode only. One fixed 60 s period, unlike the others. ---- */}
           {tab === 'digital' && (
           <fieldset className="settings-section" id="settings-jt65" {...fold('jt65')}>
@@ -9472,6 +9576,9 @@ export function SettingsPanel({
               </label>
             </div>
             <span className="settings-hint">{t('settings.q65.hint')}</span>
+          </fieldset>
+          )}
+            </div>
           </fieldset>
           )}
 
@@ -11638,7 +11745,7 @@ export function SettingsPanel({
             <div className="settings-featgroup">
               {/* ⚠️ Every featgroup title here is a service's own name and nothing else — invariant,
                   like a callsign. QRZ's callbook sign-in is here; its Logbook API key uploads, and
-                  stays with the uploads in Logging & Connectors ▸ Confirmations. */}
+                  stays with the uploads in Services ▸ Confirmations. */}
               <span className="settings-featgroup-title">QRZ</span>
               <div className="settings-grid">
                 <label className="settings-field">
@@ -12106,7 +12213,7 @@ export function SettingsPanel({
           )}
 
           {/* ---- Connections (connector status + log) — moved from Logbook & QSL ---- */}
-          {tab === 'logging' && (
+          {tab === 'services' && (
           <fieldset className="settings-section" id="settings-connections" {...fold('connections')}>
             <legend>{t('settings.connections.legend')}</legend>
             <div className="conn-status-grid">
@@ -12214,7 +12321,7 @@ export function SettingsPanel({
           )}
 
           {/* ---- Network integrations ---- */}
-          {tab === 'logging' && (
+          {tab === 'services' && (
           <fieldset className="settings-section" id="settings-integrations-feeds" {...fold('integrations-feeds')}>
             <legend>{t('settings.integrations.legend')}</legend>
             <div className="settings-featgroup">
@@ -12676,7 +12783,7 @@ export function SettingsPanel({
           )}
 
           {/* ---- N3FJP + N1MM loggers (moved from Field Day — they serve everyday club logging) ---- */}
-          {tab === 'logging' && (
+          {tab === 'services' && (
           <>
           <fieldset className="settings-section" id="settings-dxkeeper" {...fold('dxkeeper')}>
             {/* ⚠️ The legend is two product names and nothing else — invariant, and it stays
@@ -12924,7 +13031,7 @@ export function SettingsPanel({
           )}
 
           {/* ---- Confirmations (LoTW / eQSL / QRZ / ClubLog accounts) ---- */}
-          {tab === 'logging' && (
+          {tab === 'services' && (
           <>
           <fieldset className="settings-section" id="settings-confirmations" {...fold('confirmations')}>
             <legend>{t('settings.confirmations.legend')}</legend>

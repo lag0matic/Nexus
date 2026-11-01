@@ -56,9 +56,9 @@ WSJT-X muscle memory works unchanged inside a UI built this decade.
   sources, tracking upstream **3.0.2**. On identical recorded audio, the decode floor measures
   **−21.3 dB against stock WSJT-X's −20.7**, with zero false decodes, and the suite includes
   false-alarm tests that feed the decoder pure noise and require it to produce nothing at all.
-  **Rovers keep decoding here**: upstream 3.0.2 discards any decode containing `/R` outside contest
-  mode, which is exactly the VHF traffic worth catching, and a test fails if anyone reintroduces
-  that filter.
+  **Rovers decode in Contest mode**: as in WSJT-X 3.0.2, FT8 drops rover (`/R`) and `TU;` decodes
+  outside a contest, where they are almost always false, and keeps them with Contest mode on or as
+  a Hound, so VHF contest rovers still come through. Tests fail if either half changes.
 - **🗺️ APRS that shows you the network and tells you the truth about your receiver.** Stations draw
   as their **actual APRS symbol** rather than identical dots: cars, trucks, bicycles and people,
   weather stations, digipeaters and iGates, campsites, balloons, boats and aircraft, with vehicles
@@ -253,7 +253,7 @@ spot goes to and which one an APRS tune goes to.
 
 | Integration | What it does |
 |---|---|
-| **WSJT-X UDP protocol** | Full outbound Decode / Status / QsoLogged / Heartbeat + inbound HaltTx, Clear, Replay, Location, Highlight — JTAlert and GridTracker see a WSJT-X. Off until you switch on **WSJT-X UDP API** in Settings ▸ Logging & Connectors ▸ Integrations & Feeds |
+| **WSJT-X UDP protocol** | Full outbound Decode / Status / QsoLogged / Heartbeat + inbound HaltTx, Clear, Replay, Location, Highlight — JTAlert and GridTracker see a WSJT-X. Off until you switch on **WSJT-X UDP API** in Settings ▸ Services ▸ Integrations & Feeds |
 | **CAT broker** | Nexus serves a rigctld-compatible TCP port so WSJT-X, N1MM+, and loggers share the radio through it |
 | **Companion mode** | Ride an upstream WSJT-X / JTDX / MSHV decode stream over UDP instead of owning the rig |
 | **N1MM+** | Native `<contactinfo>` UDP broadcast. **Broadcast every QSO** sends each logged contact, event or not, from every mode. Point a map app such as GridTracker at the address and contacts plot as you log them. Off until you switch it on |

@@ -41,6 +41,7 @@ import { emptyAnswer } from '../features/logAnswers'
 import { fmtUtc } from '../features/logQuery'
 import { UTC_DATE_FORMAT, UTC_TIME_FORMATS } from '../features/utcLog'
 import { addedColumnText, columnName, logColumn, uploadMark, uploadOf, uploadWord } from '../features/logColumns'
+import { ContactPath } from './prop/ContactPath'
 import {
   PROGRAMS,
   cardDirty,
@@ -71,8 +72,11 @@ const QRZ_PAGE = 'QRZ ↗'
 /** A value a corrected call takes off, as the card names it: a place under its Logbook column's
  *  name, a confirmation in words. */
 function callFixLabel(c: CallFixClear): string {
+  if (c === 'card') return t('contactCard.callFix.card')
+  if (c === 'cardDated') return t('contactCard.callFix.cardDated')
   if (c === 'lotw') return t('contactCard.callFix.lotw')
   if (c === 'eqsl') return t('contactCard.callFix.eqsl')
+  if (c === 'qrz') return t('contactCard.callFix.qrz')
   const column = logColumn({ CQZ: 'cqz', ITUZ: 'ituz', CONT: 'cont', CNTY: 'county' }[c])
   return column ? columnName(column) : c
 }
@@ -497,6 +501,13 @@ function CardBody({
             </label>
           </div>
         </section>
+
+        <ContactPath
+          q={q}
+          canPick={canSave}
+          picked={fields.find((f) => f.tag === 'ANT_PATH' && !f.removed)?.value ?? null}
+          onPick={(path) => setFields((fs) => [...fs, { tag: 'ANT_PATH', orig: null, value: path, removed: false }])}
+        />
 
         <details className="qso-detail-section contact-card-more">
           <summary className="qso-detail-heading">{t('contactCard.more')}</summary>

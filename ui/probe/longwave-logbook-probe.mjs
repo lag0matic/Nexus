@@ -42,7 +42,7 @@ try {
     await wait(`document.querySelector('.logbook-row:not(.head):not(.placeholder)')`)
     await click(`[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Sync Longwave')`)
     await wait(`document.documentElement.dataset.synced==='yes' && document.body.innerText.includes('W2NEW')`)
-    await click(`document.querySelector('[title="View everything recorded for W1AW"] > .log-cell:nth-child(3)')`, 2)
+    await click(`[...document.querySelectorAll('.logbook-row[role="row"]')].find(row=>row.querySelector('.qrz-link-call')?.textContent.trim()==='W1AW')?.querySelector('.log-cell')`, 2)
     await wait(`document.querySelector('[role="dialog"]')`)
     await click(`[...document.querySelectorAll('[role="dialog"] button')].find(e=>e.textContent.trim()==='Upload to Longwave')`)
     await wait(`document.documentElement.dataset.pushed==='yes'`)

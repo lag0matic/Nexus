@@ -5488,7 +5488,7 @@ dependencies = [
 
 [[package]]
 name = "tempo"
-version = "1.21.0-longwave.11"
+version = "1.22.0-longwave.12"
 dependencies = [
  "futures-util",
  "gdk",
@@ -5549,6 +5549,7 @@ dependencies = [
  "deepcw",
  "io-kit-sys",
  "png 0.17.16",
+ "rustfft",
  "serde_json",
  "serialport",
  "tempo-app",
