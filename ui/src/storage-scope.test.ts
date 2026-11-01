@@ -168,6 +168,9 @@ export const PER_SURFACE = [
 /** Keys that describe the STATION or the PERSON and must never be scoped. Listed rather
  *  than inferred so a failure names the key that leaked. */
 const SHARED = [
+  // Browser-panel pairing belongs to this HTTP origin, shared across its tabs
+  // when remembered. It is a credential, NEVER durable station/profile data.
+  'nexus.browser-panels.access',
   // Spot me's last comment for each mode on the Spots board (SpotsSpotMe): what the operator says about
   // themselves on a mode, the same whichever window's board they spot from.
   'nexus.spotMe.comments',
