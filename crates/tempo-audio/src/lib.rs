@@ -34,14 +34,14 @@ pub mod aprsrx;
 /// alsa-lib — so it unit-tests in the headless workspace build and on every CI
 /// platform; `device::available_devices` supplies the live enumeration.
 pub mod audiodev;
-#[cfg(all(target_os = "linux", any(feature = "device", test)))]
-pub mod pipewire_monitor;
 pub mod backend;
 /// Test-CAT baud-ladder diagnosis for Icom CI-V rigs — probes the SAME serial port at
 /// the other common CI-V rates when the configured probe got zero bytes, and composes
 /// the exact "fix the app / fix the rig menu" verdict. Pure logic unit-tested; the real
 /// probe rides the `serial` feature and runs only in the `test_cat` command context.
 pub mod baud_ladder;
+#[cfg(all(target_os = "linux", any(feature = "device", test)))]
+pub mod pipewire_monitor;
 // The audio a remote over carries each way and what feeds and plays it: tempo-codec's, below the
 // engine, so that the client core builds without this crate; named here as they always were.
 pub use tempo_codec::{
