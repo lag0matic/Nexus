@@ -321,6 +321,14 @@ mod tests {
         };
         let speaker = node("nexus-test-speakers");
         let radio = node("nexus-test-radio");
+        assert_eq!(
+            speaker["info"]["props"]["factory.name"],
+            "support.null-audio-sink"
+        );
+        assert_eq!(
+            radio["info"]["props"]["factory.name"],
+            "support.null-audio-sink"
+        );
         let speaker_id = speaker["id"].as_u64().unwrap();
         let radio_id = radio["id"].as_u64().unwrap();
         let cookie = objects
@@ -341,11 +349,17 @@ mod tests {
             Arc::new(AtomicBool::new(true)),
             Arc::new(AtomicBool::new(false)),
         );
+        let ring = Arc::new(SpscRing::new(131_072));
+        let samples: Vec<f32> = (0..96_000)
+            .map(|n| (n as f32 * std::f32::consts::TAU * 1_000.0 / 48_000.0).sin() * 0.1)
+            .collect();
+        ring.push_slice(&samples);
+        assert_eq!(ring.len(), samples.len());
         let open = |target| {
             Output::open(
                 target,
                 48_000,
-                Arc::new(SpscRing::new(24_000)),
+                ring.clone(),
                 feed.clone(),
                 Arc::new(AtomicU32::new(0.5_f32.to_bits())),
             )
@@ -354,6 +368,9 @@ mod tests {
         wrong_server.cookie ^= 1;
         assert!(open(wrong_server).is_err());
         let output = open(target.clone()).unwrap();
+        std::thread::sleep(Duration::from_millis(250));
+        let queued = ring.len();
+        assert!((40_000..95_000).contains(&queued), "a 48 kHz output consumed an implausible number of samples in 250 ms: {queued} remain from 96000");
         let assert_links = || {
             let graph = dump();
             let objects = graph.as_array().unwrap();
@@ -387,6 +404,14 @@ mod tests {
                 .iter()
                 .all(|o| o["info"]["input-node-id"] == speaker_id));
         };
+        assert_links();
+        command("wpctl", &["set-volume", &speaker_id.to_string(), "0.25"]);
+        let volume = tempo_core::process::command("wpctl")
+            .args(["get-volume", &speaker_id.to_string()])
+            .output()
+            .unwrap();
+        assert!(volume.status.success());
+        assert!(String::from_utf8(volume.stdout).unwrap().contains("0.25"));
         assert_links();
         command("wpctl", &["set-default", &radio_id.to_string()]);
         std::thread::sleep(Duration::from_millis(250));
