@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ObserverPanels } from './ObserverPanels'
 import { getNeedAlerts, getOtaSpots, getPropagation, getTvStation } from '../api'
@@ -20,6 +20,65 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('browser observer panels', () => {
+  it('automatically hides a logged activation on the next periodic panel refresh', async () => {
+    vi.useFakeTimers()
+    try {
+      const spot = { activator: 'W9XYZ', reference: 'US-1234', name: 'Test park', freqKhz: 14288, mode: 'SSB', huntedToday: false }
+      vi.mocked(getOtaSpots).mockResolvedValue([spot] as Awaited<ReturnType<typeof getOtaSpots>>)
+      await act(async () => { render(<ObserverPanels />) })
+      expect(screen.getByRole('button', { name: 'Listen to W9XYZ' })).toBeTruthy()
+      vi.mocked(getOtaSpots).mockResolvedValue([{ ...spot, huntedToday: true }] as Awaited<ReturnType<typeof getOtaSpots>>)
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(screen.queryByRole('button', { name: 'Listen to W9XYZ' })).toBeNull()
+      expect(screen.getByText('All matching spots worked today.')).toBeTruthy()
+      expect(listenToSpot).not.toHaveBeenCalled()
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+    }
+  })
+
+  it('hides only log-confirmed worked-today activations by default and can show them again', async () => {
+    vi.mocked(getOtaSpots).mockResolvedValue([
+      { activator: 'W9AAA', reference: 'US-0001', name: 'Worked park', freqKhz: 14060, mode: 'CW', huntedToday: true },
+      { activator: 'W9AAA', reference: 'US-0002', name: 'Different park', freqKhz: 14250, mode: 'SSB', huntedToday: false },
+      { activator: 'W9BBB', reference: 'US-0001', name: 'Another operator', freqKhz: 7074, mode: 'FT8', huntedToday: false },
+      { activator: 'W9CCC', reference: 'US-0003', name: 'Legacy flag absent', freqKhz: 14260, mode: 'SSB' },
+    ] as Awaited<ReturnType<typeof getOtaSpots>>)
+    render(<ObserverPanels />)
+    await screen.findByRole('button', { name: 'Listen to W9BBB' })
+    expect(screen.getAllByRole('button', { name: 'Listen to W9AAA' })).toHaveLength(1)
+    expect(screen.getByText(/1 worked today hidden/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Listen to W9CCC' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Hide worked today' }))
+    expect(screen.getAllByRole('button', { name: 'Listen to W9AAA' })).toHaveLength(2)
+    expect(screen.getByText(/Worked today/)).toBeTruthy()
+    expect(listenToSpot).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Hide worked today' }))
+    fireEvent.click(screen.getByRole('button', { name: '40m' }))
+    expect(screen.queryByText(/worked today hidden/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: /^Listen to/ })).toHaveLength(1)
+  })
+
+  it('does not hide a tuned spot until the refreshed log flag confirms a contact, then restores it when eligible again', async () => {
+    const spot = { activator: 'W9XYZ', reference: 'US-1234', name: 'Test park', freqKhz: 14288, mode: 'SSB', huntedToday: false }
+    vi.mocked(getOtaSpots).mockResolvedValue([spot] as Awaited<ReturnType<typeof getOtaSpots>>)
+    render(<ObserverPanels />)
+    const row = await screen.findByRole('button', { name: 'Listen to W9XYZ' })
+    await waitFor(() => expect((row as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(row)
+    await waitFor(() => expect(listenToSpot).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('button', { name: 'Listen to W9XYZ' })).toBeTruthy()
+    vi.mocked(getOtaSpots).mockResolvedValue([{ ...spot, huntedToday: true }] as Awaited<ReturnType<typeof getOtaSpots>>)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh panel' }))
+    await screen.findByText('All matching spots worked today.')
+    expect(screen.queryByRole('button', { name: 'Listen to W9XYZ' })).toBeNull()
+    vi.mocked(getOtaSpots).mockResolvedValue([spot] as Awaited<ReturnType<typeof getOtaSpots>>)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh panel' }))
+    await screen.findByRole('button', { name: 'Listen to W9XYZ' })
+    expect(listenToSpot).toHaveBeenCalledTimes(1)
+  })
+
   it('carries a phone spot callsign and park to the laptop log draft', async () => {
     vi.mocked(getOtaSpots).mockResolvedValue([{ activator: 'W1AW/P', reference: 'US-1234', name: 'Test park', freqKhz: 14288, mode: 'SSB' }] as Awaited<ReturnType<typeof getOtaSpots>>)
     render(<ObserverPanels />)

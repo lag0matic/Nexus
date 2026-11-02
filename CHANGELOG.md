@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Custom Longwave Build
+- Match the native POTA board's Hide worked today filter in LAN browser panels. Hide only activator/park combinations the station log marks as worked since 0000Z, offer a checkbox to reveal them, and keep other operators and parks visible. Refreshing the panel updates eligibility without any transmit or logging action.
 - Add named PipeWire receive-monitor outputs on Linux, keeping desktop volume and port switching without falling back to a different sink. The existing radio TX-device guard remains enforced. Discovery/open waits until PTT is released; disabling monitoring remains immediate.
 - Prefill the Phone/CW contact draft when selecting a station in LAN browser panels; digital selections still never arm transmission. Keep the current scope span on native and browser spot selections, and fix the Conditions panel height in desktop browser windows.
 - Replace the custom live microphone adapter with upstream PC-mic routing. Migrate the saved switch/input once to the active radio without overriding explicit upstream choices; retain voice-keyer recording settings, Longwave logging, IC-7300 controls and receive-only LAN browser panels. Laptop/radio acceptance remains required.

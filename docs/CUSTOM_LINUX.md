@@ -1,7 +1,7 @@
 # Custom Longwave Linux Build
 
-Version: `1.22.0-longwave.13`.
-Branch: `codex/lan-panel-workflow-20261102`.
+Version: `1.22.0-longwave.14`.
+Branch: `codex/pota-web-worked-today-20261102`.
 Upstream integrated: `7ed3f41c9874547f8af018e56be28594b75a1f99`.
 
 This includes upstream's unreleased work, not a new official Nexus release.
@@ -21,6 +21,11 @@ The previous custom branches, `codex/lan-observer-panels` and
   transmitting or arming digital operation. Native and browser spot selections
   preserve the current hardware scope span until the operator changes it.
 - Conditions uses the available browser height in desktop-shaped windows.
+- Browser POTA hides log-confirmed worked-today activations by default, as the
+  native board does. The checkbox reveals those rows with a Worked today label.
+  The same activator at another park remains eligible; the station clock rolls
+  eligibility at 0000Z. The browser updates on its regular 30-second refresh or
+  Refresh panel; selecting a spot alone never hides it or creates a contact.
 
 - Longwave logbook selection, history, synchronization and per-contact upload results.
 - Upstream live PC-microphone routing with release-safe PTT. The custom adapter

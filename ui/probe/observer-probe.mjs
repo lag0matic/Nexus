@@ -55,7 +55,10 @@ const server = createServer(async (req, res) => {
       }
       const replies = {
         state: { radio: 2, mhz, band: '20m', mode: 'digital', tier, catOk: true, busy: keyed, observedAt: Date.now() },
-        get_ota_spots: [{ activator: 'W9XYZ', reference: 'US-1234', name: 'A long park name for testing wrapping on narrow screens', freqKhz: 14074, mode: 'FT8' }],
+        get_ota_spots: [
+          { activator: 'W9XYZ', reference: 'US-1234', name: 'A long park name for testing wrapping on narrow screens', freqKhz: 14074, mode: 'FT8', huntedToday: false },
+          { activator: 'W1AW', reference: 'US-0001', name: 'Worked park', freqKhz: 14060, mode: 'CW', huntedToday: true },
+        ],
         get_need_alerts: [{ call: 'W9XYZ', band: '20m', exactMode: 'FT4', mode: 'Digital', freqMhz: 14.08, entity: 'Test entity', headline: 'New band and mode' }],
         get_propagation: fixture.prop, tv_station: { call: 'W9XYZ', grid: 'EN37' },
         get_kc2g_muf: fixture.muf, get_space_wx_scales: fixture.scales,
@@ -124,6 +127,14 @@ try {
         assert.ok(layout.right <= width + 1 && layout.width > 250 && layout.height >= 44 && layout.scroll <= width + 1, JSON.stringify(layout))
         const before = posts.length
         if (panel === 'pota') {
+          assert.equal(await evaluate(`!!document.querySelector('[aria-label="Listen to W1AW"]')`), false, 'worked activation is hidden by default')
+          assert.ok(await evaluate(`document.querySelector('.observer-filters output').textContent.includes('1 worked today hidden')`))
+          await click('.observer-worked-filter input')
+          await wait(`!!document.querySelector('[aria-label="Listen to W1AW"]')`)
+          assert.ok(await evaluate(`document.querySelector('[aria-label="Listen to W1AW"]').textContent.includes('Worked today')`))
+          await click('.observer-worked-filter input')
+          await wait(`!document.querySelector('[aria-label="Listen to W1AW"]')`)
+          assert.equal(posts.length, before, 'worked filter must never tune')
           await click('.observer-filters button[aria-pressed=false]')
           assert.equal(posts.length, before, 'band filters must never tune')
           await click('.observer-filters button:first-child')

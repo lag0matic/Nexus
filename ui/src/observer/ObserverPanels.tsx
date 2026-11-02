@@ -11,7 +11,7 @@ import { OBSERVER_PANELS, observerPanel, POTA_BANDS, filterMode, type ObserverPa
 import { MonitorPanel } from './MonitorPanel'
 
 type Panel = ObserverPanel
-type Row = { key: string; call: string; band: string; mhz: number | null; mode: string | null; detail: string; station?: ObserverStation }
+type Row = { key: string; call: string; band: string; mhz: number | null; mode: string | null; detail: string; huntedToday?: boolean; station?: ObserverStation }
 const PANELS: { id: Panel; label: string }[] = [{ id: 'pota', label: 'POTA' }, { id: 'conditions', label: 'Conditions' }, { id: 'needed', label: 'Needed' }]
 function currentPanel(): Panel { return observerPanel(location.pathname.split('/').pop()) }
 
@@ -24,6 +24,7 @@ export function ObserverPanels() {
   const [monitor, setMonitor] = useState<MonitorData | null>(null)
   const [band, setBand] = useState('All')
   const [modeFilter, setModeFilter] = useState('All')
+  const [hideWorked, setHideWorked] = useState(true)
   const [prop, setProp] = useState<PropagationSnapshot | null>(null)
   const [grid, setGrid] = useState('')
   const [selectedCall, setSelectedCall] = useState<string | null>(null)
@@ -73,7 +74,7 @@ export function ObserverPanels() {
         if (panel === 'pota') {
           const spots = await getOtaSpots('POTA')
           next = spots.map((s) => ({ key: `${s.activator}:${s.reference}:${s.freqKhz}`, call: s.activator,
-            band: bandFromKhz(s.freqKhz), mhz: s.freqKhz / 1000, mode: listenMode(s.mode), detail: `${s.reference} ${s.name}`,
+            band: bandFromKhz(s.freqKhz), mhz: s.freqKhz / 1000, mode: listenMode(s.mode), detail: `${s.reference} ${s.name}`, huntedToday: s.huntedToday,
             station: { call: s.activator, park: { program: 'POTA', reference: s.reference } } }))
         } else if (panel === 'needed') {
           const needs = await getNeedAlerts()
@@ -113,8 +114,10 @@ export function ObserverPanels() {
   }
   const disabled = !linked || radio?.catOk !== true || radio?.busy || busy || Date.now() - lastRead > 90_000
   const query = search.trim().toUpperCase()
-  const filtered = rows.filter((r) => (panel !== 'pota' || (band === 'All' || r.band === band) && (modeFilter === 'All' || filterMode(r.mode) === modeFilter)) &&
+  const inScope = rows.filter((r) => (panel !== 'pota' || (band === 'All' || r.band === band) && (modeFilter === 'All' || filterMode(r.mode) === modeFilter)) &&
     (!query || `${r.call} ${r.band} ${r.mode} ${r.detail}`.toUpperCase().includes(query)))
+  const workedHidden = panel === 'pota' && hideWorked ? inScope.filter(r => r.huntedToday === true).length : 0
+  const filtered = panel === 'pota' && hideWorked ? inScope.filter(r => r.huntedToday !== true) : inScope
   const modes = [...new Set(['CW', 'SSB', 'FT8', 'FT4', 'FM', 'AM', ...rows.map(r => filterMode(r.mode)), modeFilter])].filter(m => m !== 'All')
   const navigate = (id: Panel) => { history.pushState(null, '', `/panels/${id}`); setSearch(''); setPanel(id) }
 
@@ -149,17 +152,20 @@ export function ObserverPanels() {
           <button type="button" key={b} aria-pressed={band === b} onClick={() => setBand(b)}>{b === 'All' ? 'All bands' : b}</button>)}</div>
         <div role="group" aria-label="POTA modes">{['All', ...modes].map(m =>
           <button type="button" key={m} aria-pressed={modeFilter === m} onClick={() => setModeFilter(m)}>{m === 'All' ? 'All modes' : m}</button>)}</div>
-        <output aria-live="polite">{filtered.length} / {rows.length} spots</output>
+        {rows.some(r => typeof r.huntedToday === 'boolean') && <label className="observer-worked-filter">
+          <input type="checkbox" checked={hideWorked} onChange={e => setHideWorked(e.target.checked)} />Hide worked today
+        </label>}
+        <output aria-live="polite">{filtered.length} / {rows.length} spots{workedHidden > 0 ? ` · ${workedHidden} worked today hidden` : ''}</output>
       </div>}
       <div className="observer-rows" aria-busy={lastRead === 0 && !error}>
-        {monitor ? <MonitorPanel key={panel} data={monitor} query={query} disabled={!!disabled} onListen={row => void tune(row)} /> : lastRead === 0 && !error ? <p>Loading…</p> : !filtered.length ? <p>No matching spots.</p> : filtered.map((row) => {
+        {monitor ? <MonitorPanel key={panel} data={monitor} query={query} disabled={!!disabled} onListen={row => void tune(row)} /> : lastRead === 0 && !error ? <p>Loading…</p> : !filtered.length ? <p>{workedHidden > 0 ? 'All matching spots worked today.' : 'No matching spots.'}</p> : filtered.map((row) => {
           const available = !disabled && row.mhz != null && row.mode != null && Number.isFinite(row.mhz)
           return <button type="button" key={row.key} className="observer-spot" disabled={!available}
             aria-label={`Listen to ${row.call}`} aria-pressed={selectedCall === row.call}
             title={!row.mode || !row.mhz ? 'No supported exact frequency and mode reported' : `Listen on ${row.mhz.toFixed(4)} MHz ${row.mode}`}
             onClick={() => void tune(row)}>
             <strong>{row.call}</strong><span className="mono">{row.mhz?.toFixed(4) ?? '—'}</span><span>{row.mode ?? 'Unknown'}</span><Crosshair size={16} aria-hidden="true" />
-            <small>{row.band} · {row.detail}</small>
+            <small>{row.band} · {row.detail}{row.huntedToday === true ? ' · Worked today' : ''}</small>
           </button>
         })}
       </div>
