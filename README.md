@@ -414,6 +414,11 @@ The modem is Fortran + C behind a Rust FFI, so the **GNU toolchain** is required
 
 Nexus is **free software under the [GNU GPL v3](COPYING)** (GPL-3.0-only).
 
+- **[pipewire-rs](https://gitlab.freedesktop.org/pipewire/pipewire-rs)** (MIT), by the
+  pipewire-rs Contributors, provides Linux's named PipeWire receive-monitor output.
+  This option needs PipeWire 1.0 or newer, its session manager and `pw-dump`.
+  The radio capture and transmit paths remain separate. See [NOTICE](NOTICE).
+
 - **[Auth0 SPA JS](https://github.com/auth0/auth0-spa-js)** and
   **[jose](https://github.com/panva/jose)** (MIT) provide Remote sign-in and token
   verification; **[Tokio Tungstenite](https://github.com/snapview/tokio-tungstenite)**

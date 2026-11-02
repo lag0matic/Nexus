@@ -719,6 +719,7 @@ export function CwCockpit({
         : { loHz: dialHzNow + rfSpan.lo, hiHz: dialHzNow + rfSpan.hi }
   useSpanAsk({
     radio: snap.activeRadioId,
+    selectionTick: snap.workTick ?? 0,
     source: nativeRf && scopeFeed ? scopeFeed.source : null,
     dialHz: dialHzNow,
     want: rfWant,

@@ -20919,6 +20919,7 @@ struct AudioDeviceDto {
 struct AudioDevices {
     input: Vec<AudioDeviceDto>,
     output: Vec<AudioDeviceDto>,
+    monitor_output: Vec<AudioDeviceDto>,
 }
 
 /// Enumerate sound-card devices for the Settings audio-device pickers. Empty
@@ -20950,6 +20951,16 @@ async fn get_audio_devices() -> AudioDevices {
         AudioDevices {
             input: dto(input, &in_locs),
             output: dto(output, &out_locs),
+            monitor_output: {
+                #[cfg(target_os = "linux")]
+                {
+                    dto(tempo_audio::pipewire_monitor::devices(), &out_locs)
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    Vec::new()
+                }
+            },
         }
     }
     #[cfg(not(feature = "radio"))]
@@ -20957,6 +20968,7 @@ async fn get_audio_devices() -> AudioDevices {
         AudioDevices {
             input: Vec::new(),
             output: Vec::new(),
+            monitor_output: Vec::new(),
         }
     }
 }

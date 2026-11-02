@@ -1,7 +1,7 @@
 # Custom Longwave Linux Build
 
-Version: `1.22.0-longwave.12`.
-Branch: `codex/upstream-pc-mic-20261101`.
+Version: `1.22.0-longwave.13`.
+Branch: `codex/lan-panel-workflow-20261102`.
 Upstream integrated: `7ed3f41c9874547f8af018e56be28594b75a1f99`.
 
 This includes upstream's unreleased work, not a new official Nexus release.
@@ -9,6 +9,18 @@ The previous custom branches, `codex/lan-observer-panels` and
 `codex/upstream-linux-20261029`, are unchanged.
 
 ## Retained Changes
+
+- Named PipeWire receive-monitor outputs, separate from the radio's capture/TX
+  selectors. Choose a `PipeWire: ...` entry for desktop volume and normal port
+  switching. Requires PipeWire 1.0 or newer, a session manager and `pw-dump`.
+  The selected sink must resolve to a physical ALSA card different from every
+  guarded TX card. Virtual/ambiguous/missing outputs are refused; playback never
+  substitutes the default sink. An unavailable built-in output needs attention
+  in the desktop audio settings before it can be selected in Nexus.
+- Browser station selections fill the Phone/CW contact draft without logging,
+  transmitting or arming digital operation. Native and browser spot selections
+  preserve the current hardware scope span until the operator changes it.
+- Conditions uses the available browser height in desktop-shaped windows.
 
 - Longwave logbook selection, history, synchronization and per-contact upload results.
 - Upstream live PC-microphone routing with release-safe PTT. The custom adapter

@@ -81,7 +81,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   } finally { window.clearTimeout(timeout) }
 }
 
-export async function listenToSpot(mhz: number, mode: string, radio: number): Promise<void> {
+export type ObserverStation = { call: string; park?: { program: string; reference: string } | null }
+
+export async function listenToSpot(mhz: number, mode: string, radio: number, station?: ObserverStation): Promise<void> {
   // Refresh immediately before the deliberate click. A changed active radio is
   // not silently adopted. Only the server's clock stamps request freshness.
   const pressed = performance.now()
@@ -90,7 +92,8 @@ export async function listenToSpot(mhz: number, mode: string, radio: number): Pr
   if (state.radio !== radio) throw new Error('The active radio changed; click again after refreshing')
   if (state.catOk !== true || state.busy) throw new Error('The radio is busy or disconnected')
   await request('/observer/listen', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ radio, mhz, mode, observedAt: state.observedAt }) })
+    body: JSON.stringify({ radio, mhz, mode, observedAt: state.observedAt,
+      ...(station ? { call: station.call, park: station.park ?? null } : {}) }) })
 }
 
 export const LISTEN_MODES = new Set(['CW', 'SSB', 'USB', 'LSB', 'AM', 'FM', 'RTTY', 'PSK31', 'BPSK31', 'FT8', 'FT4', 'FT2', 'JS8', 'JS8CALL', 'WSPR', 'FST4', 'FST4W', 'Q65', 'JT65', 'MSK144'])

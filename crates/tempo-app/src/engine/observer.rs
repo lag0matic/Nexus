@@ -1,13 +1,34 @@
 //! Receive-only selection from the LAN observer panels. No QSO action or transmit permit.
 
 use super::Engine;
-use crate::dto::Tier;
+use crate::dto::{Tier, WorkPark};
 
 impl Engine {
     /// Apply one fresh observer click atomically under the caller's engine lock.
     /// Busy requests are refused, never retained. Mode entry cannot arm, and both
     /// sides of the change retire queued transmissions and the Enable TX latch.
-    pub fn observer_listen(&mut self, radio: u32, mhz: f64, mode: &str) -> Result<(), String> {
+    pub fn observer_listen(
+        &mut self,
+        radio: u32,
+        mhz: f64,
+        mode: &str,
+        call: Option<&str>,
+        park: Option<WorkPark>,
+    ) -> Result<(), String> {
+        let call = call.map(str::trim).filter(|c| !c.is_empty());
+        if call.is_some_and(|c| {
+            c.len() > 64 || !c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'/')
+        }) || park.as_ref().is_some_and(|p| {
+            !matches!(p.program.as_str(), "POTA" | "SOTA")
+                || p.reference.is_empty()
+                || p.reference.len() > 64
+                || !p
+                    .reference
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-'))
+        }) {
+            return Err("Invalid station or park reference".into());
+        }
         if radio != self.settings.active_radio {
             return Err("The active radio changed; refresh before tuning".into());
         }
@@ -81,8 +102,13 @@ impl Engine {
             .into(),
         );
         self.work_afar = true;
-        self.work_call = None;
-        self.work_park = None;
+        // Log-draft metadata only: do not publish a TCI spot click, start a hunt or select a QSO.
+        self.work_call = if matches!(section, "phone" | "cw") {
+            call.map(str::to_ascii_uppercase)
+        } else {
+            None
+        };
+        self.note_work_park(park);
         self.halt_tx();
         Ok(())
     }
@@ -100,6 +126,64 @@ mod tests {
     }
 
     #[test]
+    fn observer_spot_metadata_only_fills_phone_and_cw_drafts_without_arming() {
+        for mode in ["SSB", "CW", "FT8", "FT4"] {
+            let mut e = connected();
+            let radio = e.settings().active_radio;
+            let park = WorkPark {
+                program: "POTA".into(),
+                reference: "US-1234".into(),
+            };
+            e.observer_listen(radio, 14.288, mode, Some(" w1aw/p "), Some(park.clone()))
+                .unwrap();
+            let manual = matches!(mode, "SSB" | "CW");
+            assert_eq!(e.work_call.as_deref(), manual.then_some("W1AW/P"));
+            assert_eq!(e.work_park, manual.then_some(park.clone()));
+            assert!(e.work_afar);
+            assert!(!e.tx_enabled());
+            assert!(e.tx_owner().is_none());
+            for slot in 1..5 {
+                assert!(e.poll_tx(slot).is_empty());
+            }
+            let tick = e.work_tick;
+            e.observer_listen(radio, 14.288, mode, Some("W1AW/P"), Some(park))
+                .unwrap();
+            assert_eq!(
+                e.work_tick,
+                tick + 1,
+                "the same station can be selected again"
+            );
+            e.observer_listen(radio, 14.288, mode, None, None).unwrap();
+            assert!(e.work_call.is_none());
+            assert!(
+                e.work_park.is_none(),
+                "a bare frequency never reuses the last station's park"
+            );
+        }
+    }
+
+    #[test]
+    fn observer_rejects_invalid_draft_hints_before_changing_the_radio() {
+        let mut e = connected();
+        let radio = e.settings().active_radio;
+        let before = e.settings().dial_mhz;
+        for (call, park) in [
+            (Some("W1AW\nPTT"), None),
+            (
+                Some("W1AW"),
+                Some(WorkPark {
+                    program: "TX".into(),
+                    reference: "US-1234".into(),
+                }),
+            ),
+        ] {
+            assert!(e.observer_listen(radio, 14.288, "SSB", call, park).is_err());
+            assert_eq!(e.settings().dial_mhz, before);
+            assert_eq!(e.work_tick, 0);
+        }
+    }
+
+    #[test]
     fn observer_click_switches_modes_but_never_arms_or_schedules_transmit() {
         for (mode, section, tier) in [
             ("CW", "cw", None),
@@ -113,7 +197,7 @@ mod tests {
             let mut e = connected();
             e.set_tx_enabled(true);
             let radio = e.settings().active_radio;
-            e.observer_listen(radio, 14.074, mode).unwrap();
+            e.observer_listen(radio, 14.074, mode, None, None).unwrap();
             assert!(!e.tx_enabled(), "{mode} must leave TX disabled");
             assert!(e.tx_owner().is_none());
             assert_eq!(e.work_view.as_deref(), Some(section));
@@ -150,14 +234,14 @@ mod tests {
             (radio, 1_000_000.0, "CW"),
             (radio, 14.074, "DIGITAL"),
         ] {
-            assert!(e.observer_listen(id, freq, mode).is_err());
+            assert!(e.observer_listen(id, freq, mode, None, None).is_err());
             assert_eq!(e.settings().dial_mhz, dial);
         }
         e.rig_keyed = true;
-        assert!(e.observer_listen(radio, 14.074, "FT8").is_err());
+        assert!(e.observer_listen(radio, 14.074, "FT8", None, None).is_err());
         e.rig_keyed = false;
         e.set_cat_status(Some(false), String::new());
-        assert!(e.observer_listen(radio, 14.074, "FT8").is_err());
+        assert!(e.observer_listen(radio, 14.074, "FT8", None, None).is_err());
         assert_eq!(e.settings().dial_mhz, dial);
     }
 
@@ -169,7 +253,7 @@ mod tests {
         e.call_cq(None).unwrap();
         assert!(e.tx_enabled(), "positive control: CQ really was armed");
         let radio = e.settings().active_radio;
-        e.observer_listen(radio, 14.08, "FT4").unwrap();
+        e.observer_listen(radio, 14.08, "FT4", None, None).unwrap();
         assert!(!e.tx_enabled());
         for slot in 1..8 {
             assert!(e.poll_tx(slot).is_empty());
@@ -184,7 +268,7 @@ mod tests {
             e.settings.phone_mode = "fm".into();
             e.set_operating_mode("phone", false);
             let radio = e.settings().active_radio;
-            e.observer_listen(radio, mhz, "SSB").unwrap();
+            e.observer_listen(radio, mhz, "SSB", None, None).unwrap();
             assert_eq!(e.rig_mode_effective(), expected);
             assert!(!e.tx_enabled());
         }

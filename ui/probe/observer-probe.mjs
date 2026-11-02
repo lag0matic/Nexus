@@ -42,7 +42,7 @@ const server = createServer(async (req, res) => {
         assert.equal(url.pathname, '/observer/listen')
         const chunks = []; for await (const chunk of req) chunks.push(chunk)
         const body = JSON.parse(Buffer.concat(chunks).toString())
-        assert.deepEqual(Object.keys(body).sort(), ['mhz', 'mode', 'observedAt', 'radio'])
+        assert.deepEqual(Object.keys(body).sort(), body.call == null ? ['mhz', 'mode', 'observedAt', 'radio'] : ['call', 'mhz', 'mode', 'observedAt', 'park', 'radio'])
         posts.push(body); mhz = body.mhz; tier = body.mode
         json({ accepted: true }); return
       }
@@ -133,6 +133,8 @@ try {
         await wait(`document.querySelector('.observer-spot')?.getAttribute('aria-pressed')==='true'`)
         assert.equal(posts.length, before + 1)
         assert.equal(posts.at(-1).mode, panel === 'pota' ? 'FT8' : 'FT4')
+        assert.equal(posts.at(-1).call, 'W9XYZ', 'the selected station reaches the laptop draft handoff')
+        assert.deepEqual(posts.at(-1).park, panel === 'pota' ? { program: 'POTA', reference: 'US-1234' } : null)
         keyed = true
         await wait(`document.querySelector('.observer-spot')?.disabled===true`)
         await click('.observer-spot')
@@ -142,6 +144,12 @@ try {
         await wait(`!!document.querySelector('.connect-shell')`)
         await new Promise(r => setTimeout(r, 1000))
         assert.equal(await evaluate(`document.body.innerText.includes('Panel unavailable.')`), false)
+        if (width >= 900) {
+          const geometry = await evaluate(`(() => {const section=document.querySelector('.observer-conditions'); const element=document.querySelector('.connect-shell'); const host=element.parentElement; const style=getComputedStyle(host); const shell=element.getBoundingClientRect(); const map=document.querySelector('.connect-map').getBoundingClientRect(); return {section:section.clientHeight,layout:host.getBoundingClientRect().height,host:host.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom),shell:shell.height,map:map.height}})()`)
+          assert.ok(geometry.layout >= geometry.section - 2, `Conditions layout must fill its flex host: ${JSON.stringify(geometry)}`)
+          assert.ok(geometry.shell >= geometry.host - 2, `Conditions must fill its desktop host: ${JSON.stringify(geometry)}`)
+          assert.ok(geometry.map > height * .35, `Conditions globe must not collapse: ${JSON.stringify(geometry)}`)
+        }
       } else {
         await wait(`!!document.querySelector('.observer-monitor h1')`)
         assert.equal(await evaluate(`document.querySelector('select[aria-label=Panel]').value`), panel)

@@ -140,6 +140,24 @@ describe('Linux: the picker reads like the operator’s own system', () => {
     api.get('getAudioDevices').mockImplementation(() => Promise.resolve(LINUX))
   })
 
+  it('offers named PipeWire sinks only for receive monitoring, storing the stable node name', async () => {
+    const name = 'pipewire:alsa_output.test.analog-stereo'
+    api.get('getAudioDevices').mockImplementation(() => Promise.resolve({
+      ...LINUX,
+      monitorOutput: [{ name, label: 'PipeWire: Built-in Audio Analog Stereo' }],
+    }))
+    settings.monitorEnabled = true
+    renderPanel()
+    await openRadioTab()
+    const monitor = await picker('Headphones or speakers')
+    expect([...monitor.options].map((o) => o.textContent)).toContain('PipeWire: Built-in Audio Analog Stereo')
+    fireEvent.change(monitor, { target: { value: name } })
+    expect(monitor.value).toBe(name)
+    for (const caption of ['Input Device (RX)', 'Output Device (TX)']) {
+      expect([...(await picker(caption)).options].map((o) => o.value)).not.toContain(name)
+    }
+  })
+
   it('shows the card DESCRIPTION and stores the ALSA PCM name', async () => {
     renderPanel()
     await openRadioTab()

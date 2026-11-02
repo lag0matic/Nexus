@@ -8559,7 +8559,7 @@ export const EN = {
   'settings.headphoneMonitor.device.hint':
     "Your headphones or speakers — must NOT be the rig's TX output device.",
   'settings.headphoneMonitor.device.linuxHint':
-    'On Linux, pick it by its card name (hw: or plughw:): receive audio does not play on the system default, pulse or pipewire, which may be the radio’s card.',
+    'On Linux, choose a named PipeWire output or an explicit card (hw: or plughw:). Generic system default, pulse and pipewire routes may be the radio’s card and are not used.',
   'settings.headphoneMonitor.level.label': 'Listening level',
   'settings.headphoneMonitor.level.aria': 'Receive listening level',
   'settings.headphoneMonitor.level.hint':

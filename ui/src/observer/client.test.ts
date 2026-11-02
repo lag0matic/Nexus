@@ -6,6 +6,15 @@ const state = { radio: 2, catOk: true, busy: false, observedAt: 1234 }
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); delete window.__NEXUS_OBSERVER_ACCESS__ })
 
 describe('receive-only browser transport', () => {
+  it('carries only optional callsign and park draft hints alongside the receive selection', async () => {
+    window.__NEXUS_OBSERVER_ACCESS__ = 'test-only-access'
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json(state)).mockResolvedValueOnce(Response.json({ accepted: true }))
+    vi.stubGlobal('fetch', fetcher)
+    await listenToSpot(14.288, 'SSB', 2, { call: 'W1AW/P', park: { program: 'POTA', reference: 'US-1234' } })
+    expect(fetcher.mock.calls.map(c => c[0])).toEqual(['/observer/read/state', '/observer/listen'])
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ radio: 2, mhz: 14.288, mode: 'SSB', observedAt: 1234,
+      call: 'W1AW/P', park: { program: 'POTA', reference: 'US-1234' } })
+  })
   it('clears revoked access but never discards pairing for an offline server or ordinary panel error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ access: 'a'.repeat(64), persistent: true })))
     await pairBrowser('12345678')

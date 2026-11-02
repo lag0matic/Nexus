@@ -18,7 +18,7 @@ On Debian/Ubuntu — this is the complete list, and it is the same one
 ```sh
 sudo apt install \
   build-essential cmake ninja-build gfortran pkg-config \
-  libfftw3-dev libboost-dev libssl-dev \
+  libfftw3-dev libboost-dev libssl-dev libpipewire-0.3-dev libclang-dev \
   libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
   librsvg2-dev libxdo-dev libsoup-3.0-dev \
   patchelf libfuse2 \
@@ -38,6 +38,11 @@ A few of those are worth a word:
   (`APPIMAGE_EXTRACT_AND_RUN=1`, which is what CI sets).
 - **`libhamlib-utils`** gives you `rigctl` and `rigctld`. Installing it **changes which tests
   actually run** — see below.
+- **`libpipewire-0.3-dev` and `libclang-dev`** build the Linux receive-monitor bindings.
+  Named PipeWire monitoring needs a PipeWire 1.0+ server, its session manager and
+  `pw-dump` (Debian/Ubuntu: `pipewire-bin`). Direct ALSA monitoring remains available
+  on older servers. The AppImage uses the host's PipeWire client library rather
+  than bundling a client that might mismatch the host's SPA modules.
 
 ## Build
 

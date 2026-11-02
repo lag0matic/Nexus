@@ -150,6 +150,7 @@ export function useSpanAsk({
   dialHz,
   want,
   choice,
+  selectionTick = 0,
   sweep,
   transmitting,
   send,
@@ -159,6 +160,8 @@ export function useSpanAsk({
   dialHz: number | null
   want: { loHz: number; hiHz: number } | null
   choice: string
+  /** A spot selection changes the dial, not the operator's hardware sweep. */
+  selectionTick?: number
   sweep: { loHz: number; hiHz: number } | null
   transmitting: boolean
   send: (ask: SpanAsk) => void
@@ -166,6 +169,7 @@ export function useSpanAsk({
   // The ask last seen, the sweep width that is Nexus's under it, and whether a sweep of that width
   // has fitted since.
   const spent = useRef<{ key: string; width: number; fitted: boolean } | null>(null)
+  const selection = useRef({ tick: selectionTick, radio, choice, source, held: selectionTick > 0 })
   const sendRef = useRef(send)
   sendRef.current = send
   const ask = source ? spanAsk(source, dialHz, want) : null
@@ -175,6 +179,16 @@ export function useSpanAsk({
   const fits = ask != null && want != null && sweep != null && sweepFits(sweep, want, ask)
   const width = sweep ? sweep.hiHz - sweep.loHz : 0
   useEffect(() => {
+    const previous = selection.current
+    const changedDevice = previous.radio !== radio || (previous.source != null && source != null && previous.source !== source)
+    selection.current = { tick: selectionTick, radio, choice, source: source ?? previous.source,
+      held: previous.tick !== selectionTick || (!changedDevice && previous.choice === choice && previous.held) }
+    if (selection.current.held) {
+      // Keep a spot click's sweep untouched, including when it mounts this cockpit.
+      // Choosing another span or another radio/source resumes explicit span control.
+      spent.current = null
+      return
+    }
     if (!ask || !sweep || transmitting) return
     const s = spent.current
     if (s?.key === key) {
@@ -192,7 +206,7 @@ export function useSpanAsk({
     // `ask` is a fresh object every render; what decides a send is in the deps, and a send takes
     // the ask of the render that ran it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, fits, width, sweep != null, transmitting])
+  }, [key, fits, width, sweep != null, transmitting, selectionTick, radio, source, choice])
 }
 
 /** Where the chosen span is kept: one record per cockpit PER WINDOW, like the audio scope's span

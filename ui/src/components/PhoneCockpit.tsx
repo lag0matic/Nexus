@@ -879,6 +879,7 @@ export function PhoneCockpit({ esmSetting, flexDaxNote, onResumeContest, active 
   // Ask the radio for the sweep that holds it (Icom CI-V, the Flex pan); never while on the air.
   useSpanAsk({
     radio: snap.activeRadioId,
+    selectionTick: snap.workTick ?? 0,
     source: nativeRf && scopeFeed ? scopeFeed.source : null,
     dialHz: dialHzNow,
     want: rfWant,

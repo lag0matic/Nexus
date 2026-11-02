@@ -44,6 +44,15 @@ pub fn resolve_output_name(name: &str) -> String {
         .unwrap_or_default()
 }
 
+#[cfg(feature = "device")]
+pub(crate) fn resolve_monitor_output(name: &str) -> Result<(String, String), String> {
+    #[cfg(target_os = "linux")]
+    if let Some(selection) = crate::pipewire_monitor::resolve(name)? {
+        return Ok(selection);
+    }
+    Ok((resolve_output_name(name), name.to_string()))
+}
+
 /// The TX devices the headphone monitor is refused against: the JS8 sounds' list, built the same
 /// way ([`crate::notify_sound::tx_audio_devices`], then
 /// [`crate::notify_sound::guarded_tx_devices`]). That is every radio profile's TX audio device, the
@@ -322,6 +331,12 @@ impl MonitorFeed {
             && !self.tx_mute.load(Ordering::Acquire)
     }
 
+    /// Whether receive playback is allowed, independently of which RX source supplies it.
+    #[cfg(all(feature = "device", target_os = "linux"))]
+    pub(crate) fn output_open(&self) -> bool {
+        self.enabled.load(Ordering::Acquire) && !self.tx_mute.load(Ordering::Acquire)
+    }
+
     /// Producer: queue `samples` (at [`Self::rate`]) for the monitor. Never blocks; a full ring
     /// drops, as the card's does. The caller checks [`Self::open`] first.
     pub fn push(&self, samples: &[f32]) {
@@ -459,6 +474,16 @@ mod device_monitor {
         eprintln!("tempo-audio: monitor stream error: {e}");
     }
 
+    enum Output {
+        Cpal {
+            _stream: Stream,
+        },
+        #[cfg(target_os = "linux")]
+        PipeWire {
+            _stream: crate::pipewire_monitor::Output,
+        },
+    }
+
     /// Owns the dark headphone-monitor output stream and the state it shares with
     /// the capture callback. Lives inside [`crate::device::CpalBackend`] on the
     /// radio-loop thread (a cpal `Stream` is `!Send`). Reconfigured in place by
@@ -480,7 +505,7 @@ mod device_monitor {
         /// when the device supports it; otherwise it resamples).
         in_rate: u32,
         /// The live monitor output stream (`None` = monitor off).
-        out_stream: Option<Stream>,
+        out_stream: Option<Output>,
         /// The device name `out_stream` targets ("" = system default), so a device
         /// change rebuilds only the output stream.
         active_device: String,
@@ -692,7 +717,18 @@ mod device_monitor {
         ring: &Arc<SpscRing>,
         feed: &MonitorFeed,
         level_bits: &Arc<AtomicU32>,
-    ) -> Result<Stream, String> {
+    ) -> Result<Output, String> {
+        #[cfg(target_os = "linux")]
+        if let Some(target) = crate::pipewire_monitor::instance(device_name)? {
+            return crate::pipewire_monitor::Output::open(
+                target,
+                in_rate,
+                ring.clone(),
+                feed.clone(),
+                level_bits.clone(),
+            )
+            .map(|stream| Output::PipeWire { _stream: stream });
+        }
         let host = cpal::default_host();
         let name = (!device_name.trim().is_empty()).then_some(device_name);
         let dev = crate::device::resolve_configured(
@@ -726,7 +762,7 @@ mod device_monitor {
             level_bits,
         )?;
         stream.play().map_err(|e| e.to_string())?;
-        Ok(stream)
+        Ok(Output::Cpal { _stream: stream })
     }
 
     #[cfg(test)]

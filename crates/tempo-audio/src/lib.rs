@@ -34,6 +34,8 @@ pub mod aprsrx;
 /// alsa-lib — so it unit-tests in the headless workspace build and on every CI
 /// platform; `device::available_devices` supplies the live enumeration.
 pub mod audiodev;
+#[cfg(all(target_os = "linux", any(feature = "device", test)))]
+pub mod pipewire_monitor;
 pub mod backend;
 /// Test-CAT baud-ladder diagnosis for Icom CI-V rigs — probes the SAME serial port at
 /// the other common CI-V rates when the configured probe got zero bytes, and composes

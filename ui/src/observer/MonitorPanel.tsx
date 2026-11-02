@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Crosshair } from 'lucide-react'
-import { listenMode, type MonitorData } from './client'
+import { listenMode, type MonitorData, type ObserverStation } from './client'
 import { observerPanel, OBSERVER_PANELS } from './panels'
 import { MapView } from '../components/MapView'
 
@@ -50,7 +50,7 @@ function MonitorMedia({ media }: { media: MonitorData['media'] }) {
 
 export function MonitorPanel({ data, query, disabled, onListen }: {
   data: MonitorData; query: string; disabled: boolean
-  onListen: (row: { call: string; mhz: number; mode: string }) => void
+  onListen: (row: { call: string; mhz: number; mode: string; station?: ObserverStation }) => void
 }) {
   const [mapCall, setMapCall] = useState<string | null>(null)
   return <div className="observer-monitor">
@@ -65,6 +65,7 @@ export function MonitorPanel({ data, query, disabled, onListen }: {
       const frequency = group.columns.indexOf('MHz')
       const modeIndex = group.columns.indexOf('Mode')
       const classIndex = group.columns.indexOf('Class')
+      const callIndex = group.columns.indexOf('Call')
       const rows = group.rows.filter(row => !query || row.join(' ').toUpperCase().includes(query))
       return <section key={group.title} className="observer-table-section">
         <h2>{group.title} <small>{group.rows.length < group.total ? `${group.rows.length} of ${group.total}` : group.total}</small></h2>
@@ -76,7 +77,8 @@ export function MonitorPanel({ data, query, disabled, onListen }: {
             return <tr key={`${row.join(':')}:${index}`}>{row.map((cell, i) => <td key={group.columns[i]}>{cell || '-'}</td>)}
               {frequency >= 0 && <td><button type="button" disabled={disabled || !mode || !Number.isFinite(mhz) || mhz <= 0}
                 title={`Listen to ${row[0]}`} aria-label={`Listen to ${row[0]}`}
-                onClick={() => { if (mode && mhz > 0) onListen({ call: row[0], mhz, mode }) }}><Crosshair size={17} aria-hidden="true" /></button></td>}
+                onClick={() => { if (mode && mhz > 0) onListen({ call: row[0], mhz, mode,
+                  ...(callIndex >= 0 ? { station: { call: row[callIndex] } } : {}) }) }}><Crosshair size={17} aria-hidden="true" /></button></td>}
             </tr>
           })}</tbody>
         </table></div>}

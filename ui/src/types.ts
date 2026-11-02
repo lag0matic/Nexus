@@ -1195,6 +1195,7 @@ export interface AudioDeviceInfo {
 export interface AudioDevices {
   input: AudioDeviceInfo[]
   output: AudioDeviceInfo[]
+  monitorOutput?: AudioDeviceInfo[]
 }
 
 /** A Parks/Summits On The Air activator currently on the air (hunter feed). */

@@ -7,7 +7,8 @@
 # One-time dev deps (Ubuntu 24.04; the script checks and names anything missing):
 #   sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
 #     librsvg2-dev libxdo-dev libssl-dev libsoup-3.0-dev patchelf build-essential \
-#     curl wget file cmake ninja-build gfortran nodejs npm
+#     curl wget file cmake ninja-build gfortran nodejs npm libpipewire-0.3-dev libclang-dev
+# Runtime receive monitoring also needs the host PipeWire client library and pw-dump.
 #   + rustup (https://rustup.rs); cargo-tauri is auto-installed if absent.
 #
 # Native build uses the SYSTEM FFTW3f (libfftw3f-dev) via pkg-config — no cross FFTW needed.
@@ -46,12 +47,13 @@ command -v cargo >/dev/null || die "Rust not found — install from https://rust
 pkg-config --exists fftw3f 2>/dev/null || die "libfftw3f-dev missing — sudo apt install libfftw3-dev"
 if [ "$GUI" = 1 ]; then
   pcmiss=()
-  for pc in webkit2gtk-4.1 gtk+-3.0 librsvg-2.0; do
+  for pc in webkit2gtk-4.1 gtk+-3.0 librsvg-2.0 libpipewire-0.3; do
     pkg-config --exists "$pc" 2>/dev/null || pcmiss+=("$pc")
   done
   [ "${#pcmiss[@]}" -eq 0 ] || die "missing GUI dev libraries (pkg-config): ${pcmiss[*]}
   Ubuntu/Debian: sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libsoup-3.0-dev"
 fi
+
 GEN=Ninja; command -v ninja >/dev/null || GEN="Unix Makefiles"
 ok "cc/gfortran/cmake ($GEN)/node, system FFTW3f$([ "$GUI" = 1 ] && echo ', webkit2gtk-4.1, patchelf')"
 
@@ -419,6 +421,15 @@ if [ -e "$work/squashfs-root/usr/lib/libwayland-client.so.0" ]; then
 else
   warn "libwayland-client.so.0 is not in this AppImage — nothing to strip (upstream may have"
   warn "fixed it)."
+fi
+
+# Use the host's PipeWire client and SPA modules together; bundling an older client can
+# mismatch the session manager and module paths on rolling-release desktops.
+if [ -e "$work/squashfs-root/usr/lib/libpipewire-0.3.so.0" ]; then
+  rm -f "$work/squashfs-root/usr/lib/libpipewire-0.3.so.0"
+  [ ! -e "$work/squashfs-root/usr/lib/libpipewire-0.3.so.0" ] \
+    || die "bundled PipeWire client survived removal"
+  repack_needed=1
 fi
 
 # ONE repack for whatever the steps above changed. This used to hang off the libwayland

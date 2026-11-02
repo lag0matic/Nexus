@@ -4193,11 +4193,11 @@ export function SettingsPanel({
   const audioOutOptions = form.audioOut && !audio.output.includes(form.audioOut)
     ? [form.audioOut, ...audio.output]
     : audio.output
-  // Headphone-monitor device picker: same enumerated-output list, keeping the
-  // saved selection visible even if it's since disappeared.
-  const monitorOutOptions = form.monitorDevice && !audio.output.includes(form.monitorDevice)
-    ? [form.monitorDevice, ...audio.output]
-    : audio.output
+  // Named PipeWire sinks are receive-only choices, never radio TX endpoints.
+  const monitorOutputs = [...(audioInfos.monitorOutput ?? []).map((x) => x.name), ...audio.output]
+  const monitorOutOptions = form.monitorDevice && !monitorOutputs.includes(form.monitorDevice)
+    ? [form.monitorDevice, ...monitorOutputs]
+    : monitorOutputs
   // Voice-mic device picker: the enumerated INPUT list (it's a microphone), keeping the
   // saved selection visible even if it's since disappeared.
   const voiceMicOptions = form.voiceMicDevice && !audio.input.includes(form.voiceMicDevice)
@@ -7530,7 +7530,7 @@ export function SettingsPanel({
                   <option value="">{t('settings.audio.device.systemDefault')}</option>
                   {monitorOutOptions.map((d) => (
                     <option key={d} value={d}>
-                      {audioLabel(d, 'output')}
+                      {audioInfos.monitorOutput?.find((row) => row.name === d)?.label ?? audioLabel(d, 'output')}
                     </option>
                   ))}
                 </select>

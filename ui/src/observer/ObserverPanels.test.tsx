@@ -20,6 +20,16 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('browser observer panels', () => {
+  it('carries a phone spot callsign and park to the laptop log draft', async () => {
+    vi.mocked(getOtaSpots).mockResolvedValue([{ activator: 'W1AW/P', reference: 'US-1234', name: 'Test park', freqKhz: 14288, mode: 'SSB' }] as Awaited<ReturnType<typeof getOtaSpots>>)
+    render(<ObserverPanels />)
+    const row = await screen.findByRole('button', { name: 'Listen to W1AW/P' })
+    await waitFor(() => expect((row as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(row)
+    await waitFor(() => expect(listenToSpot).toHaveBeenCalledWith(14.288, 'SSB', 2, {
+      call: 'W1AW/P', park: { program: 'POTA', reference: 'US-1234' },
+    }))
+  })
   it('retries a failed panel read manually without pairing again', async () => {
     vi.mocked(getOtaSpots).mockRejectedValueOnce(new Error('Network unavailable'))
     render(<ObserverPanels />)
@@ -73,7 +83,7 @@ describe('browser observer panels', () => {
     const row = await screen.findByRole('button', { name: 'Listen to W9XYZ' })
     await waitFor(() => expect((row as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(row)
-    await waitFor(() => expect(listenToSpot).toHaveBeenCalledWith(14.074, 'FT8', 2))
+    await waitFor(() => expect(listenToSpot).toHaveBeenCalledWith(14.074, 'FT8', 2, { call: 'W9XYZ', park: { program: 'POTA', reference: 'US-1234' } }))
   })
 
   it('navigates to Needed and keeps FT4 rather than guessing FT8', async () => {
@@ -82,7 +92,7 @@ describe('browser observer panels', () => {
     const row = await screen.findByRole('button', { name: 'Listen to W9XYZ' })
     await waitFor(() => expect((row as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(row)
-    await waitFor(() => expect(listenToSpot).toHaveBeenCalledWith(14.08, 'FT4', 2))
+    await waitFor(() => expect(listenToSpot).toHaveBeenCalledWith(14.08, 'FT4', 2, { call: 'W9XYZ', park: null }))
     expect(location.pathname).toBe('/panels/needed')
   })
 
@@ -101,6 +111,6 @@ describe('browser observer panels', () => {
     const spot = await screen.findByRole('button', { name: 'Map spot' })
     await waitFor(() => expect((spot as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(spot)
-    await waitFor(() => expect(listenToSpot).toHaveBeenCalledWith(14.06, 'CW', 2))
+    await waitFor(() => expect(listenToSpot).toHaveBeenCalledWith(14.06, 'CW', 2, { call: 'W9XYZ' }))
   })
 })

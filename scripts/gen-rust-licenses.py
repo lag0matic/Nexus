@@ -54,7 +54,7 @@ NOTICE_FILE = re.compile(r"^notice([._-].*)?$", re.I)
 # last four are never taken; they are here so that their texts are known as texts and left out.
 FINGERPRINTS = {
     "MIT": [r"permission is hereby granted, free of charge, to any person obtaining a copy",
-            r"the above copyright notice and this permission notice shall be included"],
+            r"the above copyright notice and this permission notice(?: \(including the next paragraph\))? shall be included"],
     "Apache-2.0": [r"apache license,? version 2\.0",
                    r"terms and conditions for use, reproduction,? and distribution"],
     "BSD-3-Clause": [r"redistribution and use in source and binary forms",

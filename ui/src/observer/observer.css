@@ -22,7 +22,7 @@
 .observer-spot > small { grid-column: 1 / -1; font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
 .observer-spot:hover:not(:disabled), .observer-spot[aria-pressed='true'] { background: var(--bg-elev); }
 .observer-spot:disabled { opacity: .55; cursor: default; }
-.observer-conditions { position: relative; flex: 1 1 0; min-height: 0; min-width: 0; overflow: auto; }
+.observer-conditions { position: relative; display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; overflow: auto; }
 .observer-header select { max-width: 100%; min-width: 0; min-height: 36px; }
 .observer-header .observer-new-tab { display: grid; place-items: center; width: 36px; min-height: 36px; border: 1px solid var(--border); border-radius: 3px; }
 .observer-refresh { display: grid; place-items: center; width: 36px; min-height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 3px; }

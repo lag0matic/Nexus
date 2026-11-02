@@ -8881,23 +8881,29 @@ impl RadioLoop {
                 // catch: the monitor would mix the received band into the rig's
                 // TX stream). An empty TX device is that default too. Resolution only runs
                 // when the monitor is on.
-                let (mon_dev, default_out) = if want.monitor_enabled {
-                    (
-                        crate::monitor::resolve_output_name(&want.monitor_device),
-                        crate::monitor::resolve_output_name(""),
-                    )
+                let resolved = if want.monitor_enabled {
+                    crate::monitor::resolve_monitor_output(&want.monitor_device)
                 } else {
-                    (want.monitor_device.clone(), String::new())
+                    Ok((want.monitor_device.clone(), want.monitor_device.clone()))
                 };
+                let default_out = if want.monitor_enabled {
+                    crate::monitor::resolve_output_name("")
+                } else {
+                    String::new()
+                };
+                let (mon_dev, open_dev) = resolved.as_ref().cloned().unwrap_or_default();
                 let guarded = crate::monitor::monitor_would_transmit(
                     &mon_dev,
                     &monitor_tx,
                     Some(&default_out),
                 );
                 self.monitor_tx = monitor_tx;
-                let effective = want.monitor_enabled && !guarded;
-                let outcome =
-                    backend.set_monitor(effective, &want.monitor_device, want.monitor_level);
+                let effective = want.monitor_enabled && !guarded && resolved.is_ok();
+                // Stop any prior monitor even when resolving a replacement fails. Never retain
+                // an old route or substitute the system default for a missing named sink.
+                let outcome = backend
+                    .set_monitor(effective, &open_dev, want.monitor_level)
+                    .and_then(|()| resolved.map(|_| ()));
                 {
                     let mut eng = engine_lock(engine);
                     match outcome {

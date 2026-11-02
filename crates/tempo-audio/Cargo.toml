@@ -15,7 +15,7 @@ workspace = true
 # system deps. The `device` feature pulls in cpal for real sound-card I/O — gate
 # it on so the workspace test build needs no audio libraries.
 default = []
-device = ["dep:cpal", "dep:tempo-net", "dep:tempo-sstv", "dep:alsa", "dep:rustfft"]
+device = ["dep:cpal", "dep:tempo-net", "dep:tempo-sstv", "dep:alsa", "dep:rustfft", "dep:pipewire", "dep:spa-sys"]
 # Serial PTT + COM-port enumeration via `serialport`. OFF by default: the
 # headless workspace build has no libudev. The station PC enables it.
 serial = ["dep:serialport"]
@@ -83,6 +83,12 @@ rustfft = { version = "6", optional = true }
 # is a version match, not a migration.
 [target.'cfg(target_os = "linux")'.dependencies]
 alsa = { version = "0.11", optional = true }
+# Receive monitoring only. Native PipeWire targets can be pinned without passing
+# through the ALSA default alias; capture and transmitter playback remain CPAL.
+# Keep the binding family at 0.6 in both tracked lockfiles: later libspa wrappers
+# assume newer video headers even though this path only uses audio (Jammy builds).
+pipewire = { version = "=0.6.0", features = ["v0_3_45"], optional = true }
+spa-sys = { package = "libspa-sys", version = "=0.6.0", optional = true }
 
 # Windows-only: assign the launched rigctld to a Job Object so the OS kills it
 # (freeing the serial/COM port) whenever Tempo exits — even on a crash.

@@ -1935,6 +1935,38 @@ component whose exact license is not stated above, consult the upstream
 project's own license files (for Hamlib, those ship under
 `resources/hamlib/`).
 
+## PipeWire receive-monitor bindings
+
+Linux receive monitoring uses pipewire, pipewire-sys, libspa and libspa-sys 0.6.0
+from https://gitlab.freedesktop.org/pipewire/pipewire-rs, under the MIT license.
+Their published source headers and LICENSE files were checked; no binding source
+is vendored or modified. The system PipeWire client library remains host-owned.
+The serializer dependency cookie-factory 0.3.3 is MIT, copyright 2017-2023
+Geoffroy Couprie. Its published crate omits the license file; the upstream text
+at the published commit is pinned in licenses/rust/upstream.json and included
+in the generated Rust dependency notices.
+
+Copyright The pipewire-rs Contributors.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
 ## DeepCW model (the AI CW decoder)
 Nexus's PRIMARY CW decoder is powered by the DeepCW neural-network model,
 created by **e04** (https://github.com/e04/deepcw-engine), licensed

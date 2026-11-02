@@ -593,6 +593,8 @@ struct Listen {
     mhz: f64,
     mode: String,
     observed_at: u64,
+    call: Option<String>,
+    park: Option<tempo_app::dto::WorkPark>,
 }
 
 fn listen(s: &Session, request: Listen) -> Result<(), String> {
@@ -623,7 +625,13 @@ fn apply_listen(request: &Listen) -> Result<(), String> {
     let app = TV_APP.get().ok_or("Still starting up")?;
     let engine = app.state::<SharedEngine>();
     let mut e = engine_try_lock(&engine).map_err(|_| "The laptop is busy; click again")?;
-    e.observer_listen(request.radio, request.mhz, &request.mode)
+    e.observer_listen(
+        request.radio,
+        request.mhz,
+        &request.mode,
+        request.call.as_deref(),
+        request.park.clone(),
+    )
 }
 
 fn cached_read(s: &Session, cmd: &str, args: &str) -> Result<Value, String> {
@@ -923,6 +931,8 @@ mod tests {
             mhz: 14.074,
             mode: "FT8".into(),
             observed_at: now_ms().saturating_sub(4000),
+            call: None,
+            park: None,
         };
         assert!(listen(&s, expired).unwrap_err().contains("expired"));
         s.active.store(false, Ordering::SeqCst);
@@ -931,8 +941,24 @@ mod tests {
             mhz: 14.074,
             mode: "FT8".into(),
             observed_at: now_ms(),
+            call: None,
+            park: None,
         };
         assert!(listen(&s, revoked).is_err());
+    }
+
+    #[test]
+    fn observer_draft_metadata_is_optional_and_never_allows_a_transmit_flag() {
+        let mut body = json!({"radio":0,"mhz":14.288,"mode":"SSB","observedAt":0});
+        let plain: Listen = serde_json::from_value(body.clone()).unwrap();
+        assert!(plain.call.is_none() && plain.park.is_none());
+        body["call"] = json!("W1AW/P");
+        body["park"] = json!({"program":"POTA","reference":"US-1234"});
+        let selected: Listen = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(selected.call.as_deref(), Some("W1AW/P"));
+        assert_eq!(selected.park.unwrap().reference, "US-1234");
+        body["arm"] = json!(true);
+        assert!(serde_json::from_value::<Listen>(body).is_err());
     }
 
     #[tokio::test]
@@ -957,7 +983,13 @@ mod tests {
             target
                 .try_lock()
                 .map_err(|_| "Busy".to_string())?
-                .observer_listen(request.radio, request.mhz, &request.mode)
+                .observer_listen(
+                    request.radio,
+                    request.mhz,
+                    &request.mode,
+                    request.call.as_deref(),
+                    request.park.clone(),
+                )
         });
         let body =
             json!({"radio":radio,"mhz":14.08,"mode":"FT4","observedAt":now_ms()}).to_string();

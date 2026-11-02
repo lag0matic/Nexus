@@ -8922,7 +8922,7 @@ export const RU: PartialCatalog = {
   "settings.headphoneMonitor.enable.hint": "Воспроизводит ПОЛУЧЕННЫЙ аудиосигнал — именно то, что слышит декодер — через устройство на этом компьютере, для диагностики уровня и помех или просто чтобы послушать диапазон. Это не монитор передачи: он никогда не воспроизводит ваш собственный голос. По умолчанию выключен; НЕПРОВЕРЕН в эфире до начала сеанса с присутствием.",
   "settings.headphoneMonitor.device.label": "Наушники или колонки",
   "settings.headphoneMonitor.device.hint": "Ваши наушники или колонки — НЕ устройство вывода TX трансивера.",
-  "settings.headphoneMonitor.device.linuxHint": "В Linux выбирайте устройство по имени карты (hw: или plughw:): на системном устройстве по умолчанию, pulse или pipewire принимаемый звук не воспроизводится — за ними может стоять карта трансивера.",
+  "settings.headphoneMonitor.device.linuxHint": "В Linux выберите именованный выход PipeWire или конкретную карту (hw: или plughw:). Общие маршруты по умолчанию, pulse и pipewire могут вести к карте трансивера и не используются.",
   "settings.headphoneMonitor.level.label": "Громкость прослушивания",
   "settings.headphoneMonitor.level.aria": "Громкость прослушивания приёма",
   "settings.headphoneMonitor.level.hint": "Громкость прослушивания в наушниках (не влияет на TX).",

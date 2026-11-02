@@ -83,6 +83,29 @@ describe('useSpanAsk', () => {
   const want = { loHz: 10_095_000, hiHz: 10_155_000 }
   const wide = { loHz: 9_620_000, hiHz: 10_620_000 }
   const base = { source: 'civ', dialHz: 10_120_000, want, choice: 'band', sweep: wide, transmitting: false }
+  it('preserves the hardware span across spot selections until the operator changes the span choice', () => {
+    const send = vi.fn()
+    const at = (dial: number) => ({ loHz: dial - 10_000, hiHz: dial + 10_000 })
+    const initial = { ...base, radio: 1, selectionTick: 0 }
+    const { rerender } = renderHook(p => useSpanAsk({ ...p, send }), { initialProps: initial })
+    expect(send).toHaveBeenCalledTimes(1)
+    send.mockClear()
+    const selected = { ...initial, selectionTick: 1, dialHz: 14_288_000, want: bandWindow(14_288_000)!, sweep: at(14_288_000) }
+    rerender(selected)
+    const next = { ...selected, dialHz: 7_188_000, want: bandWindow(7_188_000)!, sweep: at(7_188_000), selectionTick: 2 }
+    rerender(next)
+    expect(send).not.toHaveBeenCalled()
+    rerender({ ...next, choice: 'narrow', want: { loHz: 7_163_000, hiHz: 7_213_000 } })
+    expect(send).toHaveBeenCalledWith({ kind: 'civ', halfHz: 25_000 })
+  })
+  it('does not widen a scope mounted by a spot click, but a different radio can apply its span', () => {
+    const send = vi.fn()
+    const initial = { ...base, radio: 1, selectionTick: 4 }
+    const { rerender } = renderHook(p => useSpanAsk({ ...p, send }), { initialProps: initial })
+    expect(send).not.toHaveBeenCalled()
+    rerender({ ...initial, radio: 2 })
+    expect(send).toHaveBeenCalledWith({ kind: 'civ', halfHz: 50_000 })
+  })
   it('asks once for a sweep that does not fit, and not again on the next render', () => {
     const send = vi.fn()
     const { rerender } = renderHook((p) => useSpanAsk({ ...p, send }), { initialProps: base })

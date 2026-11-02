@@ -6,12 +6,12 @@ import { getNeedAlerts, getOtaSpots, getPropagation, getTvStation } from '../api
 import type { NeedTag, PropagationSnapshot } from '../types'
 import { useViewport } from '../useViewport'
 import { bandFromKhz } from '../otaHunt'
-import { listenMode, listenToSpot, observerState, observerPanelData, forgetBrowserAccess, type MonitorData, type ObserverRadio } from './client'
+import { listenMode, listenToSpot, observerState, observerPanelData, forgetBrowserAccess, type MonitorData, type ObserverRadio, type ObserverStation } from './client'
 import { OBSERVER_PANELS, observerPanel, POTA_BANDS, filterMode, type ObserverPanel } from './panels'
 import { MonitorPanel } from './MonitorPanel'
 
 type Panel = ObserverPanel
-type Row = { key: string; call: string; band: string; mhz: number | null; mode: string | null; detail: string }
+type Row = { key: string; call: string; band: string; mhz: number | null; mode: string | null; detail: string; station?: ObserverStation }
 const PANELS: { id: Panel; label: string }[] = [{ id: 'pota', label: 'POTA' }, { id: 'conditions', label: 'Conditions' }, { id: 'needed', label: 'Needed' }]
 function currentPanel(): Panel { return observerPanel(location.pathname.split('/').pop()) }
 
@@ -73,11 +73,13 @@ export function ObserverPanels() {
         if (panel === 'pota') {
           const spots = await getOtaSpots('POTA')
           next = spots.map((s) => ({ key: `${s.activator}:${s.reference}:${s.freqKhz}`, call: s.activator,
-            band: bandFromKhz(s.freqKhz), mhz: s.freqKhz / 1000, mode: listenMode(s.mode), detail: `${s.reference} ${s.name}` }))
+            band: bandFromKhz(s.freqKhz), mhz: s.freqKhz / 1000, mode: listenMode(s.mode), detail: `${s.reference} ${s.name}`,
+            station: { call: s.activator, park: { program: 'POTA', reference: s.reference } } }))
         } else if (panel === 'needed') {
           const needs = await getNeedAlerts()
           next = needs.map((n) => ({ key: `${n.call}:${n.band}:${n.exactMode}`, call: n.call, band: n.band,
-            mhz: n.freqMhz, mode: listenMode(n.exactMode, n.mode), detail: `${n.entity} · ${n.headline}` }))
+            mhz: n.freqMhz, mode: listenMode(n.exactMode, n.mode), detail: `${n.entity} · ${n.headline}`,
+            station: { call: n.call, park: n.park ?? null } }))
         } else if (panel === 'conditions') {
           const [conditions, station] = await Promise.all([getPropagation(), getTvStation()])
           if (live) { setProp(conditions); setGrid(station.grid) }
@@ -98,11 +100,12 @@ export function ObserverPanels() {
     return () => { live = false; refresh.current = null; window.clearInterval(timer); document.removeEventListener('visibilitychange', visible) }
   }, [panel])
 
-  const tune = async (row: Pick<Row, 'mhz' | 'mode' | 'call'>) => {
+  const tune = async (row: Pick<Row, 'mhz' | 'mode' | 'call' | 'station'>) => {
     if (click.current || !linked || !radio || !row.mhz || !row.mode || Date.now() - lastRead > 90_000) return
     click.current = true; setBusy(true); setError('')
     try {
-      await listenToSpot(row.mhz, row.mode, radio.radio)
+      if (row.station) await listenToSpot(row.mhz, row.mode, radio.radio, row.station)
+      else await listenToSpot(row.mhz, row.mode, radio.radio)
       setSelectedCall(row.call)
       setRadio(await observerState())
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
@@ -138,7 +141,7 @@ export function ObserverPanels() {
         onSelectCall={setSelectedCall} needByCall={emptyNeeds.current} presets={TV_PRESETS} hostBar
         onWorkSpot={(spot) => { const mode = listenMode(spot.mode)
           if (!spot.freqMhz || !mode) { setError('This spot has no supported exact frequency or mode'); return }
-          void tune({ call: spot.call, mhz: spot.freqMhz, mode }) }} />
+          void tune({ call: spot.call, mhz: spot.freqMhz, mode, station: { call: spot.call } }) }} />
     </section> : <main className="observer-list">
       {panel !== 'waterfall' && <label className="observer-search"><Search size={16} aria-hidden="true" /><input type="search" aria-label={panel === 'pota' || panel === 'needed' ? 'Filter spots' : 'Filter entries'} placeholder="Call, band, mode or reference" value={search} onChange={(e) => setSearch(e.target.value)} /></label>}
       {panel === 'pota' && <div className="observer-filters">

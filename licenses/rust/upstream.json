@@ -9,6 +9,7 @@
     "mozilla-MPL-2.0.txt": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
     "open-i18n-rust-unic-LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
     "retep998-winapi-rs-LICENSE-MIT": "5b19674a1db628a475850a131956ed49521b744e3dda8f5a94141f9aba681219",
+    "rust-bakery-cookie-factory-MIT.txt": "797f41e879803089bab55f05ba852ea181b7b9f7347e96d57b12b3b3ee97fe0e",
     "rust-bakery-nom-LICENSE": "4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0",
     "rustaudio-sample-LICENSE-MIT": "b1d6df41ed3aa96806e74c729444d7c121d90e6660a6aed01d298e03fde475a0",
     "snipsco-tract-LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
@@ -44,6 +45,15 @@
         [
           "spdx-MIT.txt",
           "https://raw.githubusercontent.com/spdx/license-list-data/v3.29.0/text/MIT.txt"
+        ]
+      ]
+    },
+    "cookie-factory 0.3.3": {
+      "license": "MIT",
+      "texts": [
+        [
+          "rust-bakery-cookie-factory-MIT.txt",
+          "https://raw.githubusercontent.com/rust-bakery/cookie-factory/d36b805dbd7dd65f2df947235c5bcc573afe2c76/LICENSES/MIT.txt"
         ]
       ]
     },
