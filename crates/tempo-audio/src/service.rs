@@ -8870,11 +8870,27 @@ impl RadioLoop {
             // radio profile's and every TX output the radio holds open, so a change to them checks
             // the monitor again too.
             let monitor_tx = crate::monitor::monitor_tx_devices(engine_lock(engine).settings());
-            if audio_rebuilt
+            let monitor_changed = audio_rebuilt
                 || want.monitor_differs(&self.applied)
                 || std::mem::take(&mut self.monitor_reapply)
-                || monitor_tx != self.monitor_tx
-            {
+                || monitor_tx != self.monitor_tx;
+            // Discovery and connection can wait on PipeWire. Never put that wait in
+            // front of an active over's PTT release; retain the change for an unkeyed tick.
+            let monitor_waits = monitor_changed
+                && want.monitor_enabled
+                && want.monitor_device.starts_with("pipewire:")
+                && (rig.keyed
+                    || self.operator_keyed()
+                    || self.flex_keyed()
+                    || self.tci_keyed()
+                    || self.tx_until_ms.is_some()
+                    || self.manual_ptt_applied
+                    || self.pc_mic_keyed
+                    || engine_lock(engine).peek_immediate_tx());
+            if monitor_waits {
+                self.monitor_reapply = true;
+            }
+            if monitor_changed && !monitor_waits {
                 // Resolve "system default" to its REAL device name first — an
                 // empty monitor_device against a named audio_out that happens to
                 // BE the OS default was a hole in the name-based guard (review

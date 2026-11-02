@@ -33,6 +33,7 @@ struct TeeBackend {
     /// turns it on (its TX-device guard already passed), muted while the operator's PTT is down.
     mon_enabled: Arc<std::sync::atomic::AtomicBool>,
     mon_tx_mute: Arc<std::sync::atomic::AtomicBool>,
+    monitor_calls: Arc<Mutex<Vec<bool>>>,
     /// The monitor's way in for audio other than the card's own, at the card's 48 kHz.
     monitor: crate::monitor::MonitorFeed,
     /// The computer's microphone (`tempo_app::engine::pc_mic`), as a sound card's capture.
@@ -66,6 +67,7 @@ impl Default for TeeBackend {
             ),
             mon_enabled,
             mon_tx_mute,
+            monitor_calls: Arc::default(),
             pc_mic: Arc::new(Mutex::new(PcMicDevice {
                 level: 0.2,
                 ..PcMicDevice::default()
@@ -103,6 +105,7 @@ impl AudioBackend for TeeBackend {
             .is_some_and(|t| t.retune(tail))
     }
     fn set_monitor(&mut self, enabled: bool, _device: &str, _level: f32) -> Result<(), String> {
+        self.monitor_calls.lock().unwrap().push(enabled);
         self.mon_enabled
             .store(enabled, std::sync::atomic::Ordering::SeqCst);
         Ok(())
@@ -1171,6 +1174,62 @@ fn programs_on_the_tci_server_hear_the_flexs_dax_audio() {
 const HEADSET: &str = "hw:CARD=Headset,DEV=0";
 /// The rig's TX audio card, by another spelling.
 const SAME_AS_TX: &str = "PLUGHW:CARD=codec,DEV=0";
+
+#[test]
+fn pipewire_monitor_reconfiguration_waits_for_ptt_release_but_disable_does_not() {
+    let mut s = native_audio_with_the_monitor_on(HEADSET);
+    s.run(200);
+    {
+        let mut e = s.engine.lock().unwrap();
+        e.set_license_class("extra");
+        e.set_operating_mode("phone", true);
+        e.set_frequency(14.250, "20m", "USB");
+        e.set_ptt(true);
+    }
+    run_until(&mut s, "control: PTT never keyed", |s| {
+        s.state.flex_keyed() || s.rig.keyed
+    });
+    monitor_on(&s, "pipewire:nexus-test-absent");
+    s.backend.monitor_calls.lock().unwrap().clear();
+    s.run(100);
+    assert!(
+        s.backend.monitor_calls.lock().unwrap().is_empty(),
+        "monitor discovery/open must not delay PTT release"
+    );
+    assert!(
+        s.state.monitor_reapply,
+        "the configuration must remain pending"
+    );
+    {
+        let mut e = s.engine.lock().unwrap();
+        let mut settings = e.settings().clone();
+        settings.monitor_enabled = false;
+        e.apply_settings(settings);
+    }
+    s.run(100);
+    assert!(
+        !s.backend.monitor_calls.lock().unwrap().is_empty(),
+        "disabling must not wait for an unkey"
+    );
+    assert!(s
+        .backend
+        .monitor_calls
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|enabled| !enabled));
+    monitor_on(&s, "pipewire:nexus-test-absent");
+    s.backend.monitor_calls.lock().unwrap().clear();
+    s.run(100);
+    assert!(s.backend.monitor_calls.lock().unwrap().is_empty());
+    s.engine.lock().unwrap().set_ptt(false);
+    run_until(
+        &mut s,
+        "the pending monitor was never applied after unkey",
+        |s| !s.backend.monitor_calls.lock().unwrap().is_empty(),
+    );
+    assert!(!s.state.flex_keyed() && !s.rig.keyed);
+}
 
 /// "Play receive audio here" on, to `device`, with the rig's TX audio on its own device. The names
 /// are ALSA cards' (`HEADSET`, `SAME_AS_TX`), so two different cards on every platform: on Linux the
