@@ -1,10 +1,14 @@
 # Custom Longwave Linux Build
 
-Version: `1.22.0-longwave.14`.
-Branch: `codex/pota-web-worked-today-20261102`.
-Upstream integrated: `7ed3f41c9874547f8af018e56be28594b75a1f99`.
+Version: `1.23.0-longwave.15`.
+Branch: `codex/upstream-linux-20261106`.
+Upstream integrated: `e3b9ef1e68d9d2305db7c67da6ff34d85d2d796c`.
 
 This includes upstream's unreleased work, not a new official Nexus release.
+Upstream 1.23.0's scope layouts, station profiles and logging intake are included.
+With Split Operation set to Rig, a digital screen can leave split active with
+TX disabled. Switch to Phone/CW before using a rig microphone or foot switch;
+see upstream's 1.23.0 release notes for the split and FT2 timing limitations.
 The previous custom branches, `codex/lan-observer-panels` and
 `codex/upstream-linux-20261029`, are unchanged.
 

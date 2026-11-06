@@ -4,6 +4,7 @@
 
 use serde_json::{json, Value};
 
+#[cfg(feature = "device")]
 const PREFIX: &str = "pipewire:";
 const INSTANCE_PREFIX: &str = "pipewire-instance:";
 

@@ -96,7 +96,7 @@ export async function listenToSpot(mhz: number, mode: string, radio: number, sta
       ...(station ? { call: station.call, park: station.park ?? null } : {}) }) })
 }
 
-export const LISTEN_MODES = new Set(['CW', 'SSB', 'USB', 'LSB', 'AM', 'FM', 'RTTY', 'PSK31', 'BPSK31', 'FT8', 'FT4', 'FT2', 'JS8', 'JS8CALL', 'WSPR', 'FST4', 'FST4W', 'Q65', 'JT65', 'MSK144'])
+export const LISTEN_MODES = new Set(['CW', 'SSB', 'USB', 'LSB', 'AM', 'FM', 'RTTY', 'PSK31', 'BPSK31', 'PSK63', 'FT8', 'FT4', 'FT2', 'JS8', 'JS8CALL', 'WSPR', 'FST4', 'FST4W', 'Q65', 'JT65', 'MSK144'])
 
 export function listenMode(exact: string | null | undefined, category?: string): string | null {
   const mode = exact?.trim().toUpperCase()

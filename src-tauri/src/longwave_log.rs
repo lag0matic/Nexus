@@ -616,6 +616,8 @@ pub async fn longwave_push_qso(
         result.map(|_| UploadReportDto {
             dispatched: 1, outcome: "accepted".into(), detail: None,
             skipped_edited: 0, skipped_deleted: 0, held_mode: 0,
+            location_tie: 0, location_unmatched: 0, location_from_adif: false,
+            unsent_after_error: 0, unsent_error: None, unconfirmed_after_error: 0,
         }).map_err(|error| {
             if error == Failure::Refused {
                 "Longwave upload refused or already sent/unconfirmed; sync history and check Longwave before retrying".into()

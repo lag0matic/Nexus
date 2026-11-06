@@ -4,6 +4,7 @@
   "cqPauseSecs",
   "wsjtxUdp",
   "wsjtxUdpAddr",
+  "wsjtxUdpAcceptOtherComputers",
   "catBroker",
   "catBrokerPtt",
   "js8ApiTcp",
@@ -60,6 +61,10 @@
   "fdJoinAddr",
   "icomLanHost",
   "icomLanPort",
+  "freedvLog",
+  "freedvLogPort",
+  "logIntakeLan",
+  "logIntakePeer",
   "clublogApiKey",
   "cloudlogKey"
 ]

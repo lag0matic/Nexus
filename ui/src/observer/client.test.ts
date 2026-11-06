@@ -99,4 +99,8 @@ describe('receive-only browser transport', () => {
     expect(listenMode(null, 'CW')).toBe('CW')
     expect(listenMode('ALIEN', 'Digital')).toBeNull()
   })
+
+  it('keeps upstream PSK63 exact rather than substituting another digital mode', () => {
+    expect(listenMode('PSK63', 'Digital')).toBe('PSK63')
+  })
 })

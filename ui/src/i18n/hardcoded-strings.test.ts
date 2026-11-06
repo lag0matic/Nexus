@@ -83,6 +83,7 @@ const MIGRATED = [
   // Settings' one Connect to my station… entry — born migrated: its label, button, hint and failure line.
   'lan/ConnectEntry.tsx',
   'components/SettingsStation.tsx',
+  'components/StationProfiles.tsx',
   // Settings ▸ Appearance ▸ Colours (2026-09-26) — born migrated: the section's rows, and the role
   // table whose `labelKey`/`hintKey` entries name every role and preset word.
   'components/SettingsColours.tsx',
@@ -112,6 +113,9 @@ const MIGRATED = [
   // CW's half of the same surface: its keys and their editor, captioned from CW's own catalog
   // keys. It stops nothing; CwCockpit.tsx's Esc and Stop TX are the stops.
   'components/CwMacroEditor.tsx',
+  // The words for macro keys 13–16 (2026-11-01), born migrated: their name where an F-key's would
+  // go and the line that says a click sends them. It stops nothing.
+  'features/macroSlotWords.ts',
   'components/SettingsClusterNodes.tsx',
   'components/SettingsSearch.tsx',
   'components/OnboardingBanner.tsx',
@@ -122,6 +126,11 @@ const MIGRATED = [
   'features/clientWords.ts',
   // The words for a restore refused while the radio is keyed (2026-10-29), born migrated.
   'features/restoreWords.ts',
+  // The CAT launch Nexus refuses itself (a Hardware handshake where RTS keys the transmitter),
+  // shown in the operator's language in the CAT status and Test CAT — born migrated.
+  'features/catDetail.ts',
+  // The one-window radio refusal in the operator's language (its English is the backend's, matched, never shown).
+  'radioRefusal.ts',
   // The saved keys held back until the operator confirms them (2026-10-28), born migrated.
   'components/KeyConfirmBanner.tsx',
   // This computer ▸ Audio (2026-10-08), born migrated: a driving computer's headset.
@@ -226,6 +235,7 @@ const MIGRATED = [
   'components/MapView.tsx',
   'components/MapLayersPanel.tsx',
   'components/MapPicker.tsx',
+  'components/MapStylePick.tsx',
   'components/MapLegend.tsx',
   'components/Globe3D.tsx',
   'components/QsoGlobe.tsx',
@@ -237,6 +247,8 @@ const MIGRATED = [
   'propViz.ts',
   'openingAlert.ts',
   'stormAlert.ts',
+  // The Kp-now words and the aurora chip's watch word (caps and ovals).
+  'capsNow.ts',
   // The flare heads-up toast, its copy in the catalog like the storm toast's.
   'flareAlert.ts',
   // The NOAA storm-watch heads-up toast (once per watch serial).
@@ -268,6 +280,13 @@ const MIGRATED = [
   'components/prop/KpOutlookPane.tsx',
   // The "coming" chip on the map and globe: NOAA's watch, the model line, a measured arrival.
   'components/prop/ArrivalChip.tsx',
+  // The polar-cap and aurora chips on the map and globe (caps and ovals).
+  'components/prop/CapsChips.tsx',
+  // The six-hour replay bar and its Layers-panel button, and the sun disc with NOAA's active regions.
+  'components/prop/ReplayBar.tsx',
+  'components/prop/SunRegionsDisc.tsx',
+  // The space-weather chip stack: two chips and "+N more" on a narrow map, and the list it opens.
+  'components/prop/WxChipStack.tsx',
   'components/prop/DxpedCalendar.tsx',
   'components/prop/DxpedDigest.tsx',
   'components/prop/DxpedMonth.tsx',
@@ -287,6 +306,9 @@ const MIGRATED = [
   'features/pathRibbon.ts',
   'components/prop/PathDayStrip.tsx',
   'features/pathDay.ts',
+  // The flare / proton overlay on a path and the outlook's "now" line (solar paths and outlook).
+  'features/pathNow.ts',
+  'components/prop/SpaceNowLine.tsx',
   'features/pathGrade.ts',
   'components/prop/PathGradeCell.tsx',
   'components/prop/ContactPath.tsx',
@@ -305,6 +327,11 @@ const MIGRATED = [
   'components/SpotsPanel.tsx',
   // The worked window's picker, out of SpotsPanel so the Call Roster can share it.
   'components/WorkedWindowSelect.tsx',
+  // The search box and chips the Spots and Needed boards share, born migrated.
+  'components/SharedFilterChips.tsx',
+  // The Phone FreeDV pane (2026-10-14) — born migrated: calls, mode names, SNRs, frequencies and the
+  // address are tokens.
+  'components/FreedvPane.tsx',
   'components/SpotDialog.tsx',
   'components/ParkStateReview.tsx',
   // Check confirmations (2026-10-07) — born migrated: LoTW, calls, bands, modes and credit codes
@@ -349,6 +376,8 @@ const MIGRATED = [
   // The radio switch notice (2026-10-27): born migrated. The radio name, the band and the routing
   // mode name in it are data.
   'useRadioSwitchNotice.ts',
+  // The one-time UI-scale prompt on a scaled display: born migrated. The percentages are data.
+  'useScaleFitNotice.ts',
   // The first-contact walk-through and the experience answers (2026-10-27): born migrated. The TX
   // buttons' names in the walk are the strip's own untranslated labels, quoted as data.
   'components/FirstContactWalk.tsx',
@@ -498,6 +527,8 @@ const MIGRATED = [
   // Connect's Spots box, born migrated: its one status line is the Phone pane's own.
   'components/connect/SpotsBox.tsx',
   'components/connect/NeededBox.tsx',
+  // The Getting Out list and its sort bar, born migrated: every chip a catalog key.
+  'components/connect/GetoutList.tsx',
   'components/Conversation.tsx',
   'components/Composer.tsx',
   'components/MessageBubble.tsx',
@@ -585,6 +616,9 @@ const MIGRATED = [
   // worked and working-now — is ONE entry per row with each clause interpolated whole,
   // carrying its own separator, rather than six variant sentences or a glued string.
   'components/OperateCockpit.tsx',
+  // The Rx/Tx Hz entry, moved out of OperateCockpit when JS8 took it too (#448); its Rx/Tx/Hz
+  // tokens moved with it.
+  'components/DfField.tsx',
   'components/OperateDecodes.tsx',
   'components/OperateRoster.tsx',
   'components/TxPanel.tsx',
@@ -654,6 +688,8 @@ const MIGRATED = [
   'components/FrequencyReadout.tsx',
   'components/TuningStrip.tsx',
   'components/PhoneScope.tsx',
+  // The CW and Phone scope head's RF / Audio / Both chip (2026-11-04), born migrated.
+  'components/ScopeViewChips.tsx',
   'components/RfScopePane.tsx',
   'components/RttyTuningScope.tsx',
   'components/Waterfall.tsx',
@@ -667,6 +703,9 @@ const MIGRATED = [
   // a named constant exactly as this file's sibling `TxMeters.tsx` holds its four.
   'components/SMeter.tsx',
   'components/TxMeters.tsx',
+  // The needle faces TxMeters draws in place of its PO, ALC and SWR bars (#343). Born migrated: the
+  // meter names arrive from TxMeters' constants, the rest is through `t()`.
+  'components/TxNeedles.tsx',
   // The Phone cockpit's Sub receiver strip (dual-receiver radios). Migrated from birth: its
   // only bare literals are the rig's own plate `SUB` and the em dash for a value not known,
   // both held as named constants.
@@ -694,6 +733,9 @@ const MIGRATED = [
   // The words for a file the station could not read and kept — migrated from birth. The station
   // sends a store token and a path; every sentence is here, from the catalog.
   'features/keptFiles.ts',
+  // The words for a contact another program logged into Nexus (the toast, the via mark) —
+  // migrated from birth. The program's name passes through as the station sends it.
+  'features/logIntake.ts',
   // The transmitter alarm's banner — migrated from birth. The alarm's own words are the
   // station's and pass through as the CAT status's do; everything around them is catalogued.
   'components/TxAlarmBanner.tsx',
@@ -762,6 +804,8 @@ const MIGRATED = [
   'components/Js8InboxPanel.tsx',
   'components/Js8AddStation.tsx',
   'components/Js8ListMenu.tsx',
+  // #346 — the Call Roster's and Band Activity's row menu, migrated from birth.
+  'components/CallRowMenu.tsx',
   'components/js8ListMenus.ts',
   'components/Js8ListsSettings.tsx',
   // Settings ▸ Digital ▸ JS8's JS8Call API switches and ports — migrated from birth.

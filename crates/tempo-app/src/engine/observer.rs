@@ -19,7 +19,7 @@ impl Engine {
         if call.is_some_and(|c| {
             c.len() > 64 || !c.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'/')
         }) || park.as_ref().is_some_and(|p| {
-            !matches!(p.program.as_str(), "POTA" | "SOTA")
+            !matches!(p.program.as_str(), "POTA" | "SOTA" | "WWFF")
                 || p.reference.is_empty()
                 || p.reference.len() > 64
                 || !p
@@ -45,7 +45,7 @@ impl Engine {
             "CW" => ("cw", None),
             "SSB" | "USB" | "LSB" | "AM" | "FM" => ("phone", None),
             "RTTY" => ("rtty", None),
-            "PSK31" | "BPSK31" => ("keyboard", None),
+            "PSK31" | "BPSK31" | "PSK63" => ("keyboard", None),
             "FT8" => ("digital", Some(Tier::Ft8)),
             "FT4" => ("digital", Some(Tier::Ft4)),
             "FT2" => ("digital", Some(Tier::Ft2)),
@@ -64,7 +64,12 @@ impl Engine {
         }
         self.set_operating_mode_with_arming(section, false, false);
         if section == "keyboard" {
-            self.set_psk_mode(tempo_core::psk::PskModeKind::Bpsk31, false)?;
+            let psk = if mode.trim().eq_ignore_ascii_case("PSK63") {
+                tempo_core::psk::PskModeKind::Bpsk63
+            } else {
+                tempo_core::psk::PskModeKind::Bpsk31
+            };
+            self.set_psk_mode(psk, false)?;
         }
         let offset = self.soundcard_cw_pitch_offset_mhz(mhz);
         self.sideband_override = None;
@@ -123,6 +128,29 @@ mod tests {
         e.set_license_class("extra");
         e.set_cat_status(Some(true), String::new());
         e
+    }
+
+    #[test]
+    fn observer_new_upstream_program_and_mode_only_select_receive() {
+        let mut e = connected();
+        let radio = e.settings().active_radio;
+        let park = WorkPark {
+            program: "WWFF".into(),
+            reference: "DLFF-0001".into(),
+        };
+        e.observer_listen(radio, 14.288, "SSB", Some("DL0XYZ"), Some(park.clone()))
+            .unwrap();
+        assert_eq!(e.work_park, Some(park));
+        assert!(!e.tx_enabled());
+        assert!(e.tx_owner().is_none());
+        e.observer_listen(radio, 14.07, "PSK63", None, None)
+            .unwrap();
+        assert_eq!(e.psk_mode(), (tempo_core::psk::PskModeKind::Bpsk63, false));
+        assert!(!e.tx_enabled());
+        assert!(e.tx_owner().is_none());
+        for slot in 1..5 {
+            assert!(e.poll_tx(slot).is_empty());
+        }
     }
 
     #[test]
