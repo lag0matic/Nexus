@@ -46,6 +46,11 @@ ignore = [
     "RUSTSEC-2026-0370", # zvariant
     "RUSTSEC-2026-0371", # zbus_names
     "RUSTSEC-2026-0372", # zvariant_derive
+    # pin-utils: archived helper, pulled in by nix 0.26 through serialport and
+    # PipeWire. This advisory reports unmaintained status, not a vulnerability,
+    # and lists no safe upgrade. Approved for this custom build on 2026-11-06.
+    # Revisit when those dependencies stop using it or a maintained fix exists.
+    "RUSTSEC-2026-0441", # pin-utils
     # ---- A VERSION match where the vulnerable data is not present. ----
     # webpki-roots 0.26.11 (src-tauri, through tokio-tungstenite) is a semver-trick shim: its
     # whole content is `pub use parent::TLS_SERVER_ROOTS` from webpki-roots 1.x, which both
